@@ -94,6 +94,7 @@ export interface WebviewMessage {
 		| "checkpointRestore"
 		| "deleteMcpServer"
 		| "maxOpenTabsContext"
+		| "browserToolEnabled"
 	text?: string
 	disabled?: boolean
 	askResponse?: ClineAskResponse
@@ -121,6 +122,7 @@ export interface WebviewMessage {
 
 export const checkoutDiffPayloadSchema = z.object({
 	ts: z.number(),
+	previousCommitHash: z.string().optional(),
 	commitHash: z.string(),
 	mode: z.enum(["full", "checkpoint"]),
 })

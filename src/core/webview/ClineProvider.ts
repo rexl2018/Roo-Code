@@ -509,7 +509,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
           <body>
             <noscript>You need to enable JavaScript to run this app.</noscript>
             <div id="root"></div>
-            <script nonce="${nonce}" src="${scriptUri}"></script>
+            <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
           </body>
         </html>
       `
@@ -1222,6 +1222,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "maxOpenTabsContext":
 						const tabCount = Math.min(Math.max(0, message.value ?? 20), 500)
 						await this.updateGlobalState("maxOpenTabsContext", tabCount)
+						await this.postStateToWebview()
+						break
+					case "browserToolEnabled":
+						await this.updateGlobalState("browserToolEnabled", message.bool ?? true)
 						await this.postStateToWebview()
 						break
 					case "enhancementApiConfigId":
@@ -2030,6 +2034,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			autoApprovalEnabled,
 			experiments,
 			maxOpenTabsContext,
+			browserToolEnabled,
 		} = await this.getState()
 
 		const allowedCommands = vscode.workspace.getConfiguration("roo-cline").get<string[]>("allowedCommands") || []
@@ -2083,6 +2088,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
 			maxOpenTabsContext: maxOpenTabsContext ?? 20,
 			cwd: cwd,
+			browserToolEnabled: browserToolEnabled ?? true,
 		}
 	}
 
@@ -2226,6 +2232,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			modelMaxTokens,
 			modelMaxThinkingTokens,
 			maxOpenTabsContext,
+			browserToolEnabled,
 		] = await Promise.all([
 			this.getGlobalState("apiProvider") as Promise<ApiProvider | undefined>,
 			this.getGlobalState("apiModelId") as Promise<string | undefined>,
@@ -2314,6 +2321,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			this.getGlobalState("modelMaxTokens") as Promise<number | undefined>,
 			this.getGlobalState("anthropicThinking") as Promise<number | undefined>,
 			this.getGlobalState("maxOpenTabsContext") as Promise<number | undefined>,
+			this.getGlobalState("browserToolEnabled") as Promise<boolean | undefined>,
 		])
 
 		let apiProvider: ApiProvider
@@ -2450,6 +2458,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			autoApprovalEnabled: autoApprovalEnabled ?? false,
 			customModes,
 			maxOpenTabsContext: maxOpenTabsContext ?? 20,
+			openRouterUseMiddleOutTransform: openRouterUseMiddleOutTransform ?? true,
+			browserToolEnabled: browserToolEnabled ?? true,
 		}
 	}
 

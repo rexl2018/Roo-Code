@@ -1,28 +1,25 @@
 import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk"
-import { ApiConfiguration, ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../../shared/api"
-import { ApiHandler, SingleCompletionHandler } from "../index"
+import { SingleCompletionHandler } from "../"
+import { ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../../shared/api"
 import { convertToSimpleMessages } from "../transform/simple-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
+import { BaseProvider } from "./base-provider"
 
-export interface ArkHandlerOptions extends ApiHandlerOptions {
-	defaultHeaders?: Record<string, string>
-}
-
-export class ArkHandler implements ApiHandler, SingleCompletionHandler {
-	protected options: ArkHandlerOptions
+export class ArkHandler extends BaseProvider implements SingleCompletionHandler {
+	protected options: ApiHandlerOptions
 	private client: OpenAI
 
-	constructor(options: ArkHandlerOptions) {
+	constructor(options: ApiHandlerOptions) {
+		super()
 		this.options = options
 		this.client = new OpenAI({
 			apiKey: this.options.apiKey,
-			baseURL: this.options.openAiBaseUrl,
-			defaultHeaders: this.options.defaultHeaders,
+			baseURL: this.options.openAiBaseUrl
 		})
 	}
 
-	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+	override async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const modelInfo = this.getModel().info
 		const modelId = this.options.apiModelId ?? ""
 
@@ -97,6 +94,3 @@ export class ArkHandler implements ApiHandler, SingleCompletionHandler {
 	ark = true
 }
 
-export const createArkHandler = (options: ArkHandlerOptions) => {
-	return new ArkHandler(options)
-}
