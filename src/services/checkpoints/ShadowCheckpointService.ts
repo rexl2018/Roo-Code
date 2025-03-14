@@ -1,13 +1,19 @@
 import fs from "fs/promises"
 import os from "os"
 import * as path from "path"
+import crypto from "crypto"
 import EventEmitter from "events"
 
 import simpleGit, { SimpleGit } from "simple-git"
 import { globby } from "globby"
+import pWaitFor from "p-wait-for"
 
-import { GIT_DISABLED_SUFFIX, GIT_EXCLUDES } from "./constants"
+import { fileExistsAtPath } from "../../utils/fs"
+import { CheckpointStorage } from "../../shared/checkpoints"
+
+import { GIT_DISABLED_SUFFIX } from "./constants"
 import { CheckpointDiff, CheckpointResult, CheckpointEventMap } from "./types"
+import { getExcludePatterns } from "./excludes"
 
 export abstract class ShadowCheckpointService extends EventEmitter {
 	public readonly taskId: string
@@ -65,12 +71,6 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		const gitVersion = await git.version()
 		this.log(`[${this.constructor.name}#create] git = ${gitVersion}`)
 
-		const fileExistsAtPath = (path: string) =>
-			fs
-				.access(path)
-				.then(() => true)
-				.catch(() => false)
-
 		let created = false
 		const startTime = Date.now()
 
@@ -84,41 +84,16 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				)
 			}
 
+			await this.writeExcludeFile()
 			this.baseHash = await git.revparse(["HEAD"])
 		} else {
 			this.log(`[${this.constructor.name}#initShadowGit] creating shadow git repo at ${this.checkpointsDir}`)
-
 			await git.init()
 			await git.addConfig("core.worktree", this.workspaceDir) // Sets the working tree to the current workspace.
 			await git.addConfig("commit.gpgSign", "false") // Disable commit signing for shadow repo.
 			await git.addConfig("user.name", "Roo Code")
 			await git.addConfig("user.email", "noreply@example.com")
-
-			let lfsPatterns: string[] = [] // Get LFS patterns from workspace if they exist.
-
-			try {
-				const attributesPath = path.join(this.workspaceDir, ".gitattributes")
-
-				if (await fileExistsAtPath(attributesPath)) {
-					lfsPatterns = (await fs.readFile(attributesPath, "utf8"))
-						.split("\n")
-						.filter((line) => line.includes("filter=lfs"))
-						.map((line) => line.split(" ")[0].trim())
-				}
-			} catch (error) {
-				this.log(
-					`[${this.constructor.name}#initShadowGit] failed to read .gitattributes: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-
-			// Add basic excludes directly in git config, while respecting any
-			// .gitignore in the workspace.
-			// .git/info/exclude is local to the shadow git repo, so it's not
-			// shared with the main repo - and won't conflict with user's
-			// .gitignore.
-			await fs.mkdir(path.join(this.dotGitDir, "info"), { recursive: true })
-			const excludesPath = path.join(this.dotGitDir, "info", "exclude")
-			await fs.writeFile(excludesPath, [...GIT_EXCLUDES, ...lfsPatterns].join("\n"))
+			await this.writeExcludeFile()
 			await this.stageAll(git)
 			const { commit } = await git.commit("initial commit", { "--allow-empty": null })
 			this.baseHash = commit
@@ -126,6 +101,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 
 		const duration = Date.now() - startTime
+
 		this.log(
 			`[${this.constructor.name}#initShadowGit] initialized shadow repo with base commit ${this.baseHash} in ${duration}ms`,
 		)
@@ -145,8 +121,18 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		return { created, duration }
 	}
 
+	// Add basic excludes directly in git config, while respecting any
+	// .gitignore in the workspace.
+	// .git/info/exclude is local to the shadow git repo, so it's not
+	// shared with the main repo - and won't conflict with user's
+	// .gitignore.
+	protected async writeExcludeFile() {
+		await fs.mkdir(path.join(this.dotGitDir, "info"), { recursive: true })
+		const patterns = await getExcludePatterns(this.workspaceDir)
+		await fs.writeFile(path.join(this.dotGitDir, "info", "exclude"), patterns.join("\n"))
+	}
+
 	private async stageAll(git: SimpleGit) {
-		// await writeExcludesFile(gitPath, await getLfsPatterns(this.cwd)).
 		await this.renameNestedGitRepos(true)
 
 		try {
@@ -188,6 +174,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 			try {
 				await fs.rename(fullPath, newPath)
+
 				this.log(
 					`[${this.constructor.name}#renameNestedGitRepos] ${disable ? "disabled" : "enabled"} nested git repo ${gitPath}`,
 				)
@@ -333,5 +320,136 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	override once<K extends keyof CheckpointEventMap>(event: K, listener: (data: CheckpointEventMap[K]) => void) {
 		return super.once(event, listener)
+	}
+
+	/**
+	 * Storage
+	 */
+
+	public static hashWorkspaceDir(workspaceDir: string) {
+		return crypto.createHash("sha256").update(workspaceDir).digest("hex").toString().slice(0, 8)
+	}
+
+	protected static taskRepoDir({ taskId, globalStorageDir }: { taskId: string; globalStorageDir: string }) {
+		return path.join(globalStorageDir, "tasks", taskId, "checkpoints")
+	}
+
+	protected static workspaceRepoDir({
+		globalStorageDir,
+		workspaceDir,
+	}: {
+		globalStorageDir: string
+		workspaceDir: string
+	}) {
+		return path.join(globalStorageDir, "checkpoints", this.hashWorkspaceDir(workspaceDir))
+	}
+
+	public static async getTaskStorage({
+		taskId,
+		globalStorageDir,
+		workspaceDir,
+	}: {
+		taskId: string
+		globalStorageDir: string
+		workspaceDir: string
+	}): Promise<CheckpointStorage | undefined> {
+		// Is there a checkpoints repo in the task directory?
+		const taskRepoDir = this.taskRepoDir({ taskId, globalStorageDir })
+
+		if (await fileExistsAtPath(taskRepoDir)) {
+			return "task"
+		}
+
+		// Does the workspace checkpoints repo have a branch for this task?
+		const workspaceRepoDir = this.workspaceRepoDir({ globalStorageDir, workspaceDir })
+
+		if (!(await fileExistsAtPath(workspaceRepoDir))) {
+			return undefined
+		}
+
+		const git = simpleGit(workspaceRepoDir)
+		const branches = await git.branchLocal()
+
+		if (branches.all.includes(`roo-${taskId}`)) {
+			return "workspace"
+		}
+
+		return undefined
+	}
+
+	public static async deleteTask({
+		taskId,
+		globalStorageDir,
+		workspaceDir,
+	}: {
+		taskId: string
+		globalStorageDir: string
+		workspaceDir: string
+	}) {
+		const storage = await this.getTaskStorage({ taskId, globalStorageDir, workspaceDir })
+
+		if (storage === "task") {
+			const taskRepoDir = this.taskRepoDir({ taskId, globalStorageDir })
+			await fs.rm(taskRepoDir, { recursive: true, force: true })
+			console.log(`[${this.name}#deleteTask.${taskId}] removed ${taskRepoDir}`)
+		} else if (storage === "workspace") {
+			const workspaceRepoDir = this.workspaceRepoDir({ globalStorageDir, workspaceDir })
+			const branchName = `roo-${taskId}`
+			const git = simpleGit(workspaceRepoDir)
+			const success = await this.deleteBranch(git, branchName)
+
+			if (success) {
+				console.log(`[${this.name}#deleteTask.${taskId}] deleted branch ${branchName}`)
+			} else {
+				console.error(`[${this.name}#deleteTask.${taskId}] failed to delete branch ${branchName}`)
+			}
+		}
+	}
+
+	public static async deleteBranch(git: SimpleGit, branchName: string) {
+		const branches = await git.branchLocal()
+
+		if (!branches.all.includes(branchName)) {
+			console.error(`[${this.constructor.name}#deleteBranch] branch ${branchName} does not exist`)
+			return false
+		}
+
+		const currentBranch = await git.revparse(["--abbrev-ref", "HEAD"])
+
+		if (currentBranch === branchName) {
+			const worktree = await git.getConfig("core.worktree")
+
+			try {
+				await git.raw(["config", "--unset", "core.worktree"])
+				await git.reset(["--hard"])
+				await git.clean("f", ["-d"])
+				const defaultBranch = branches.all.includes("main") ? "main" : "master"
+				await git.checkout([defaultBranch, "--force"])
+
+				await pWaitFor(
+					async () => {
+						const newBranch = await git.revparse(["--abbrev-ref", "HEAD"])
+						return newBranch === defaultBranch
+					},
+					{ interval: 500, timeout: 2_000 },
+				)
+
+				await git.branch(["-D", branchName])
+				return true
+			} catch (error) {
+				console.error(
+					`[${this.constructor.name}#deleteBranch] failed to delete branch ${branchName}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+
+				return false
+			} finally {
+				if (worktree.value) {
+					await git.addConfig("core.worktree", worktree.value)
+				}
+			}
+		} else {
+			await git.branch(["-D", branchName])
+			return true
+		}
 	}
 }

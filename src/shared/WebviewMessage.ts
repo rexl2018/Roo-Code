@@ -48,20 +48,22 @@ export interface WebviewMessage {
 		| "alwaysAllowBrowser"
 		| "alwaysAllowMcp"
 		| "alwaysAllowModeSwitch"
+		| "alwaysAllowSubtasks"
 		| "playSound"
 		| "soundEnabled"
 		| "soundVolume"
 		| "diffEnabled"
 		| "enableCheckpoints"
+		| "checkpointStorage"
 		| "browserViewportSize"
 		| "screenshotQuality"
+		| "remoteBrowserHost"
 		| "openMcpSettings"
 		| "restartMcpServer"
 		| "toggleToolAlwaysAllow"
 		| "toggleMcpServer"
 		| "updateMcpTimeout"
 		| "fuzzyMatchThreshold"
-		| "preferredLanguage"
 		| "writeDelayMs"
 		| "enhancePrompt"
 		| "enhancedPrompt"
@@ -70,6 +72,7 @@ export interface WebviewMessage {
 		| "terminalOutputLineLimit"
 		| "mcpEnabled"
 		| "enableMcpServerCreation"
+		| "enableCustomModeCreation"
 		| "searchCommits"
 		| "alwaysApproveResubmit"
 		| "requestDelaySeconds"
@@ -94,7 +97,15 @@ export interface WebviewMessage {
 		| "checkpointRestore"
 		| "deleteMcpServer"
 		| "maxOpenTabsContext"
+		| "humanRelayResponse"
+		| "humanRelayCancel"
 		| "browserToolEnabled"
+		| "telemetrySetting"
+		| "showRooIgnoredFiles"
+		| "testBrowserConnection"
+		| "discoverBrowser"
+		| "browserConnectionResult"
+		| "remoteBrowserEnabled"
 	text?: string
 	disabled?: boolean
 	askResponse?: ClineAskResponse
@@ -118,6 +129,7 @@ export interface WebviewMessage {
 	timeout?: number
 	payload?: WebViewMessagePayload
 	source?: "global" | "project"
+	requestId?: string
 }
 
 export const checkoutDiffPayloadSchema = z.object({
