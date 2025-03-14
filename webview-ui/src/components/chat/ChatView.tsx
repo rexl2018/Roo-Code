@@ -29,6 +29,8 @@ import AutoApproveMenu from "./AutoApproveMenu"
 import { AudioType } from "../../../../src/shared/WebviewMessage"
 import { validateCommand } from "../../utils/command-validation"
 import { getAllModes } from "../../../../src/shared/modes"
+import TelemetryBanner from "../common/TelemetryBanner"
+import { useAppTranslation } from "@/i18n/TranslationContext"
 
 interface ChatViewProps {
 	isHidden: boolean
@@ -60,8 +62,12 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		setMode,
 		autoApprovalEnabled,
 		alwaysAllowModeSwitch,
+		alwaysAllowSubtasks,
 		customModes,
+		telemetrySetting,
 	} = useExtensionState()
+
+	const { t } = useAppTranslation()
 
 	//const task = messages.length > 0 ? (messages[0].say === "task" ? messages[0] : undefined) : undefined) : undefined
 	const task = useMemo(() => messages.at(0), [messages]) // leaving this less safe version here since if the first message is not a task, then the extension is in a bad state and needs to be debugged (see Cline.abort)
@@ -145,6 +151,10 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 								case "newFileCreated":
 									setPrimaryButtonText("Save")
 									setSecondaryButtonText("Reject")
+									break
+								case "finishTask":
+									setPrimaryButtonText("Complete Subtask and Return")
+									setSecondaryButtonText(undefined)
 									break
 								default:
 									setPrimaryButtonText("Approve")
@@ -298,6 +308,19 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		return false
 	}, [modifiedMessages, clineAsk, enableButtons, primaryButtonText])
 
+	const handleChatReset = useCallback(() => {
+		// Only reset message-specific state, preserving mode.
+		setInputValue("")
+		setTextAreaDisabled(true)
+		setSelectedImages([])
+		setClineAsk(undefined)
+		setEnableButtons(false)
+		// Do not reset mode here as it should persist.
+		// setPrimaryButtonText(undefined)
+		// setSecondaryButtonText(undefined)
+		disableAutoScrollRef.current = false
+	}, [])
+
 	const handleSendMessage = useCallback(
 		(text: string, images: string[]) => {
 			text = text.trim()
@@ -309,36 +332,22 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						case "followup":
 						case "tool":
 						case "browser_action_launch":
-						case "command": // user can provide feedback to a tool or command use
-						case "command_output": // user can send input to command stdin
+						case "command": // User can provide feedback to a tool or command use.
+						case "command_output": // User can send input to command stdin.
 						case "use_mcp_server":
-						case "completion_result": // if this happens then the user has feedback for the completion result
+						case "completion_result": // If this happens then the user has feedback for the completion result.
 						case "resume_task":
 						case "resume_completed_task":
 						case "mistake_limit_reached":
-							vscode.postMessage({
-								type: "askResponse",
-								askResponse: "messageResponse",
-								text,
-								images,
-							})
+							vscode.postMessage({ type: "askResponse", askResponse: "messageResponse", text, images })
 							break
-						// there is no other case that a textfield should be enabled
+						// There is no other case that a textfield should be enabled.
 					}
 				}
-				// Only reset message-specific state, preserving mode
-				setInputValue("")
-				setTextAreaDisabled(true)
-				setSelectedImages([])
-				setClineAsk(undefined)
-				setEnableButtons(false)
-				// Do not reset mode here as it should persist
-				// setPrimaryButtonText(undefined)
-				// setSecondaryButtonText(undefined)
-				disableAutoScrollRef.current = false
+				handleChatReset()
 			}
 		},
-		[messages.length, clineAsk],
+		[messages.length, clineAsk, handleChatReset],
 	)
 
 	const handleSetChatBoxMessage = useCallback(
@@ -491,6 +500,9 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					break
 				case "invoke":
 					switch (message.invoke!) {
+						case "newChat":
+							handleChatReset()
+							break
 						case "sendMessage":
 							handleSendMessage(message.text ?? "", message.images ?? [])
 							break
@@ -511,6 +523,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			isHidden,
 			textAreaDisabled,
 			enableButtons,
+			handleChatReset,
 			handleSendMessage,
 			handleSetChatBoxMessage,
 			handlePrimaryButtonClick,
@@ -639,8 +652,10 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				(alwaysAllowMcp && message.ask === "use_mcp_server" && isMcpToolAlwaysAllowed(message)) ||
 				(alwaysAllowModeSwitch &&
 					message.ask === "tool" &&
-					(JSON.parse(message.text || "{}")?.tool === "switchMode" ||
-						JSON.parse(message.text || "{}")?.tool === "newTask"))
+					JSON.parse(message.text || "{}")?.tool === "switchMode") ||
+				(alwaysAllowSubtasks &&
+					message.ask === "tool" &&
+					["newTask", "finishTask"].includes(JSON.parse(message.text || "{}")?.tool))
 			)
 		},
 		[
@@ -655,6 +670,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			alwaysAllowMcp,
 			isMcpToolAlwaysAllowed,
 			alwaysAllowModeSwitch,
+			alwaysAllowSubtasks,
 		],
 	)
 
@@ -1087,9 +1103,10 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						flexDirection: "column",
 						paddingBottom: "10px",
 					}}>
+					{telemetrySetting === "unset" && <TelemetryBanner />}
 					{showAnnouncement && <Announcement version={version} hideAnnouncement={hideAnnouncement} />}
 					<div style={{ padding: "0 20px", flexShrink: 0 }}>
-						<h2>What can Roo do for you?</h2>
+						<h2>{t("chat:greeting")}</h2>
 						<p>
 							Thanks to the latest breakthroughs in agentic coding capabilities, I can handle complex
 							software development tasks step-by-step. With tools that let me create & edit files, explore
@@ -1264,7 +1281,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				modeShortcutText={modeShortcutText}
 			/>
 
-			<div id="chat-view-portal" />
+			<div id="roo-portal" />
 		</div>
 	)
 }

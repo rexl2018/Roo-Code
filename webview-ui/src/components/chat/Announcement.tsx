@@ -26,38 +26,52 @@ const Announcement = ({ version, hideAnnouncement }: AnnouncementProps) => {
 				style={{ position: "absolute", top: "8px", right: "8px" }}>
 				<span className="codicon codicon-close"></span>
 			</VSCodeButton>
-			<h2 style={{ margin: "0 0 8px" }}>🎉{"  "}Automatic Checkpoints Now Enabled</h2>
+			<h2 style={{ margin: "0 0 8px" }}>🎉{"  "}Roo Code 3.8 Released</h2>
 
 			<p style={{ margin: "5px 0px" }}>
-				We're thrilled to announce that our experimental Checkpoints feature is now enabled by default for all
-				users. This powerful feature automatically tracks your project changes during a task, allowing you to
-				quickly review or revert to earlier states if needed.
+				Roo Code 3.8 is out with performance boosts, new features, and bug fixes.
 			</p>
 
 			<h3 style={{ margin: "12px 0 8px" }}>What's New</h3>
-			<p style={{ margin: "5px 0px" }}>
-				Automatic Checkpoints provide you with:
+			<div style={{ margin: "5px 0px" }}>
 				<ul style={{ margin: "4px 0 6px 20px", padding: 0 }}>
-					<li>Peace of mind when making significant changes</li>
-					<li>Ability to visually inspect changes between steps</li>
-					<li>Easy rollback if you're not satisfied with certain code modifications</li>
-					<li>Improved navigation through complex task execution</li>
+					<li>• Faster asynchronous checkpoints</li>
+					<li>• Support for .rooignore files</li>
+					<li>• Fixed terminal & gray screen issues</li>
+					<li>• Roo Code can run in multiple windows</li>
+					<li>• Experimental multi-diff editing strategy</li>
+					<li>• Subtask to parent task communication</li>
+					<li>• Updated DeepSeek provider</li>
+					<li>• New "Human Relay" provider</li>
 				</ul>
-			</p>
+			</div>
 
-			<h3 style={{ margin: "12px 0 8px" }}>Customize Your Experience</h3>
-			<p style={{ margin: "5px 0px" }}>
-				While we recommend keeping this feature enabled, you can disable it if needed.{" "}
+			<p style={{ margin: "10px 0px 0px" }}>
+				Get more details and discuss in{" "}
 				<VSCodeLink
-					href="#"
+					href="https://discord.gg/roocode"
 					onClick={(e) => {
 						e.preventDefault()
-						window.postMessage({ type: "action", action: "settingsButtonClicked" }, "*")
-					}}
-					style={{ display: "inline", padding: "0 2px" }}>
-					Open Settings
+						window.postMessage(
+							{ type: "action", action: "openExternal", data: { url: "https://discord.gg/roocode" } },
+							"*",
+						)
+					}}>
+					Discord
 				</VSCodeLink>{" "}
-				and look for the "Enable automatic checkpoints" option in the Advanced Settings section.
+				and{" "}
+				<VSCodeLink
+					href="https://reddit.com/r/RooCode"
+					onClick={(e) => {
+						e.preventDefault()
+						window.postMessage(
+							{ type: "action", action: "openExternal", data: { url: "https://reddit.com/r/RooCode" } },
+							"*",
+						)
+					}}>
+					Reddit
+				</VSCodeLink>{" "}
+				🚀
 			</p>
 		</div>
 	)

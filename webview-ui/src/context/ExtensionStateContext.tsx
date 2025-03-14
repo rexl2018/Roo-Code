@@ -10,6 +10,7 @@ import { checkExistKey } from "../../../src/shared/checkExistApiConfig"
 import { Mode, CustomModePrompts, defaultModeSlug, defaultPrompts, ModeConfig } from "../../../src/shared/modes"
 import { CustomSupportPrompts } from "../../../src/shared/support-prompt"
 import { experimentDefault, ExperimentId } from "../../../src/shared/experiments"
+import { TelemetrySetting } from "../../../src/shared/TelemetrySetting"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	didHydrateState: boolean
@@ -27,7 +28,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setAlwaysAllowBrowser: (value: boolean) => void
 	setAlwaysAllowMcp: (value: boolean) => void
 	setAlwaysAllowModeSwitch: (value: boolean) => void
+	setAlwaysAllowSubtasks: (value: boolean) => void
 	setBrowserToolEnabled: (value: boolean) => void
+	setShowRooIgnoredFiles: (value: boolean) => void
 	setShowAnnouncement: (value: boolean) => void
 	setAllowedCommands: (value: string[]) => void
 	setSoundEnabled: (value: boolean) => void
@@ -36,8 +39,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setEnableCheckpoints: (value: boolean) => void
 	setBrowserViewportSize: (value: string) => void
 	setFuzzyMatchThreshold: (value: number) => void
-	preferredLanguage: string
-	setPreferredLanguage: (value: string) => void
 	setWriteDelayMs: (value: number) => void
 	screenshotQuality?: number
 	setScreenshotQuality: (value: number) => void
@@ -47,6 +48,8 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setMcpEnabled: (value: boolean) => void
 	enableMcpServerCreation: boolean
 	setEnableMcpServerCreation: (value: boolean) => void
+	enableCustomModeCreation?: boolean
+	setEnableCustomModeCreation: (value: boolean) => void
 	alwaysApproveResubmit?: boolean
 	setAlwaysApproveResubmit: (value: boolean) => void
 	requestDelaySeconds: number
@@ -66,6 +69,10 @@ export interface ExtensionStateContextType extends ExtensionState {
 	customModes: ModeConfig[]
 	setCustomModes: (value: ModeConfig[]) => void
 	setMaxOpenTabsContext: (value: number) => void
+	setTelemetrySetting: (value: TelemetrySetting) => void
+	remoteBrowserEnabled?: boolean
+	setRemoteBrowserEnabled: (value: boolean) => void
+	machineId?: string
 }
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
@@ -107,8 +114,10 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		soundVolume: 0.5,
 		diffEnabled: false,
 		enableCheckpoints: true,
+		checkpointStorage: "task",
 		fuzzyMatchThreshold: 1.0,
-		preferredLanguage: "English",
+		language: "en", // Default language code
+		enableCustomModeCreation: true,
 		writeDelayMs: 1000,
 		browserViewportSize: "900x600",
 		screenshotQuality: 75,
@@ -130,6 +139,8 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		maxOpenTabsContext: 20,
 		cwd: "",
 		browserToolEnabled: true,
+		telemetrySetting: "unset",
+		showRooIgnoredFiles: true, // Default to showing .rooignore'd files with lock symbol (current behavior)
 	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
@@ -237,6 +248,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setAlwaysAllowBrowser: (value) => setState((prevState) => ({ ...prevState, alwaysAllowBrowser: value })),
 		setAlwaysAllowMcp: (value) => setState((prevState) => ({ ...prevState, alwaysAllowMcp: value })),
 		setAlwaysAllowModeSwitch: (value) => setState((prevState) => ({ ...prevState, alwaysAllowModeSwitch: value })),
+		setAlwaysAllowSubtasks: (value) => setState((prevState) => ({ ...prevState, alwaysAllowSubtasks: value })),
 		setShowAnnouncement: (value) => setState((prevState) => ({ ...prevState, shouldShowAnnouncement: value })),
 		setAllowedCommands: (value) => setState((prevState) => ({ ...prevState, allowedCommands: value })),
 		setSoundEnabled: (value) => setState((prevState) => ({ ...prevState, soundEnabled: value })),
@@ -246,7 +258,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setBrowserViewportSize: (value: string) =>
 			setState((prevState) => ({ ...prevState, browserViewportSize: value })),
 		setFuzzyMatchThreshold: (value) => setState((prevState) => ({ ...prevState, fuzzyMatchThreshold: value })),
-		setPreferredLanguage: (value) => setState((prevState) => ({ ...prevState, preferredLanguage: value })),
 		setWriteDelayMs: (value) => setState((prevState) => ({ ...prevState, writeDelayMs: value })),
 		setScreenshotQuality: (value) => setState((prevState) => ({ ...prevState, screenshotQuality: value })),
 		setTerminalOutputLineLimit: (value) =>
@@ -264,10 +275,15 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setCustomSupportPrompts: (value) => setState((prevState) => ({ ...prevState, customSupportPrompts: value })),
 		setEnhancementApiConfigId: (value) =>
 			setState((prevState) => ({ ...prevState, enhancementApiConfigId: value })),
+		setEnableCustomModeCreation: (value) =>
+			setState((prevState) => ({ ...prevState, enableCustomModeCreation: value })),
 		setAutoApprovalEnabled: (value) => setState((prevState) => ({ ...prevState, autoApprovalEnabled: value })),
 		setCustomModes: (value) => setState((prevState) => ({ ...prevState, customModes: value })),
 		setMaxOpenTabsContext: (value) => setState((prevState) => ({ ...prevState, maxOpenTabsContext: value })),
 		setBrowserToolEnabled: (value) => setState((prevState) => ({ ...prevState, browserToolEnabled: value })),
+		setTelemetrySetting: (value) => setState((prevState) => ({ ...prevState, telemetrySetting: value })),
+		setShowRooIgnoredFiles: (value) => setState((prevState) => ({ ...prevState, showRooIgnoredFiles: value })),
+		setRemoteBrowserEnabled: (value) => setState((prevState) => ({ ...prevState, remoteBrowserEnabled: value })),
 	}
 
 	return <ExtensionStateContext.Provider value={contextValue}>{children}</ExtensionStateContext.Provider>
