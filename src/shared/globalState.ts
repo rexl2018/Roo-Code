@@ -25,6 +25,7 @@ export const SECRET_KEYS = [
 	"deepSeekApiKey",
 	"mistralApiKey",
 	"unboundApiKey",
+	"arkApiKey",
 	"requestyApiKey",
 ] as const
 
@@ -65,6 +66,7 @@ export const GLOBAL_STATE_KEYS = [
 	"lmStudioModelId",
 	"lmStudioBaseUrl",
 	"anthropicBaseUrl",
+	"deepSeekBaseUrl",
 	"modelMaxThinkingTokens",
 	"azureApiVersion",
 	"openAiStreamingEnabled",
@@ -106,6 +108,7 @@ export const GLOBAL_STATE_KEYS = [
 	"requestyModelId",
 	"requestyModelInfo",
 	"unboundModelInfo",
+	"arkBaseUrl",
 	"modelTemperature",
 	"modelMaxTokens",
 	"mistralCodestralUrl",

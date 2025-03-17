@@ -16,6 +16,7 @@ export type ApiProvider =
 	| "mistral"
 	| "unbound"
 	| "requesty"
+	| "ark"
 	| "human-relay"
 
 export interface ApiHandlerOptions {
@@ -30,6 +31,8 @@ export interface ApiHandlerOptions {
 	openRouterModelId?: string
 	openRouterModelInfo?: ModelInfo
 	openRouterBaseUrl?: string
+	arkApiKey?: string
+	arkBaseUrl?: string
 	awsAccessKey?: string
 	awsSecretKey?: string
 	awsSessionToken?: string
@@ -121,12 +124,13 @@ export const API_CONFIG_KEYS: GlobalStateKey[] = [
 	"azureApiVersion",
 	"openRouterUseMiddleOutTransform",
 	"openAiStreamingEnabled",
-	// "deepSeekBaseUrl", //  not exist on GlobalStateKey
+	"deepSeekBaseUrl",
 	// "includeMaxTokens", // not exist on GlobalStateKey
 	"unboundModelId",
 	"unboundModelInfo",
 	"requestyModelId",
 	"requestyModelInfo",
+	"arkBaseUrl",
 	"modelTemperature",
 	"modelMaxTokens",
 	"modelMaxThinkingTokens",

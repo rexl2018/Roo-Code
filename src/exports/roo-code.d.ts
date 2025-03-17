@@ -131,6 +131,7 @@ export type SecretKey =
 	| "deepSeekApiKey"
 	| "mistralApiKey"
 	| "unboundApiKey"
+	| "arkApiKey"
 	| "requestyApiKey"
 
 export type GlobalStateKey =
@@ -203,10 +204,12 @@ export type GlobalStateKey =
 	| "autoApprovalEnabled"
 	| "enableCustomModeCreation" // Enable the ability for Roo to create custom modes
 	| "customModes" // Array of custom modes
+	| "deepSeekBaseUrl"
 	| "unboundModelId"
 	| "requestyModelId"
 	| "requestyModelInfo"
 	| "unboundModelInfo"
+	| "arkBaseUrl"
 	| "modelTemperature"
 	| "modelMaxTokens"
 	| "mistralCodestralUrl"

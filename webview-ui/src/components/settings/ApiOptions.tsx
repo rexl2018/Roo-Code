@@ -1218,7 +1218,22 @@ const ApiOptions = ({
 						onInput={handleInputChange("deepSeekApiKey")}
 						placeholder="Enter API Key..."
 						className="w-full">
-						<span className="font-medium">{t("settings:providers.deepSeekApiKey")}</span>
+						<span className="font-medium">DeepSeek API Key</span>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration?.deepSeekBaseUrl || ""}
+						style={{ width: "100%", marginTop: 3 }}
+						type="url"
+						onInput={handleInputChange("deepSeekBaseUrl")}
+						placeholder="Default: https://api.deepseek.com/v1">
+						<span className="font-medium">DeepSeek Base URL</span>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration?.apiModelId || ""}
+						style={{ width: "100%" }}
+						onInput={handleInputChange("apiModelId")}
+						placeholder="Enter Model ID...">
+						<span style={{ fontWeight: 500 }}>DeepSeek Model ID</span>
 					</VSCodeTextField>
 					<div className="text-sm text-vscode-descriptionForeground -mt-2">
 						{t("settings:providers.apiKeyStorageNotice")}
@@ -1338,6 +1353,41 @@ const ApiOptions = ({
 				</>
 			)}
 
+			{selectedProvider === "ark" && (
+				<div>
+					<VSCodeTextField
+						value={apiConfiguration?.apiKey || ""}
+						style={{ width: "100%" }}
+						type="password"
+						onInput={handleInputChange("apiKey")}
+						placeholder="Enter API Key...">
+						<span style={{ fontWeight: 500 }}>Ark API Key</span>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration?.arkBaseUrl || ""}
+						style={{ width: "100%" }}
+						type="url"
+						onInput={handleInputChange("arkBaseUrl")}
+						placeholder="Enter Base URL...">
+						<span style={{ fontWeight: 500 }}>Ark Base URL</span>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration?.apiModelId || ""}
+						style={{ width: "100%" }}
+						onInput={handleInputChange("apiModelId")}
+						placeholder="Enter Model ID...">
+						<span style={{ fontWeight: 500 }}>Ark Model ID</span>
+					</VSCodeTextField>
+					<div className="text-sm text-vscode-descriptionForeground">
+						This key is stored locally and only used to make API requests from this extension.
+					</div>
+					<div className="text-sm text-vscode-descriptionForeground">
+						Ark is an OpenAI-compatible API provider. You can use it to access various AI models through a
+						unified interface.
+					</div>
+				</div>
+			)}
+
 			{selectedProvider === "human-relay" && (
 				<>
 					<div className="text-sm text-vscode-descriptionForeground">
@@ -1348,8 +1398,6 @@ const ApiOptions = ({
 					</div>
 				</>
 			)}
-
-			{/* Model Pickers */}
 
 			{selectedProvider === "openrouter" && (
 				<ModelPicker
