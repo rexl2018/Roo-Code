@@ -1,31 +1,46 @@
+import os from "os"
+import * as path from "path"
+import fs from "fs/promises"
+import EventEmitter from "events"
+
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
 import axios from "axios"
-import fs from "fs/promises"
-import os from "os"
 import pWaitFor from "p-wait-for"
-import * as path from "path"
 import * as vscode from "vscode"
 
+import {
+	CheckpointStorage,
+	GlobalState,
+	Language,
+	ProviderSettings,
+	RooCodeSettings,
+	ApiConfigMeta,
+} from "../../schemas"
+import { changeLanguage, t } from "../../i18n"
 import { setPanel } from "../../activate/registerCommands"
-import { ApiConfiguration, ApiProvider, ModelInfo, API_CONFIG_KEYS } from "../../shared/api"
+import {
+	ApiConfiguration,
+	ApiProvider,
+	ModelInfo,
+	requestyDefaultModelId,
+	requestyDefaultModelInfo,
+	openRouterDefaultModelId,
+	openRouterDefaultModelInfo,
+	glamaDefaultModelId,
+	glamaDefaultModelInfo,
+} from "../../shared/api"
 import { findLast } from "../../shared/array"
 import { supportPrompt } from "../../shared/support-prompt"
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import {
-	SecretKey,
-	GlobalStateKey,
-	SECRET_KEYS,
-	GLOBAL_STATE_KEYS,
-	ConfigurationValues,
-} from "../../shared/globalState"
 import { HistoryItem } from "../../shared/HistoryItem"
-import { ApiConfigMeta, ExtensionMessage } from "../../shared/ExtensionMessage"
+import { ExtensionMessage } from "../../shared/ExtensionMessage"
 import { checkoutDiffPayloadSchema, checkoutRestorePayloadSchema, WebviewMessage } from "../../shared/WebviewMessage"
-import { Mode, PromptComponent, defaultModeSlug, ModeConfig } from "../../shared/modes"
+import { Mode, PromptComponent, defaultModeSlug, getModeBySlug, getGroupName } from "../../shared/modes"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { EXPERIMENT_IDS, experiments as Experiments, experimentDefault, ExperimentId } from "../../shared/experiments"
 import { formatLanguage } from "../../shared/language"
+import { Terminal, TERMINAL_SHELL_INTEGRATION_TIMEOUT } from "../../integrations/terminal/Terminal"
 import { downloadTask } from "../../integrations/misc/export-markdown"
 import { openFile, openImage } from "../../integrations/misc/open-file"
 import { selectImages } from "../../integrations/misc/process-images"
@@ -35,16 +50,19 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
 import { BrowserSession } from "../../services/browser/BrowserSession"
-import { discoverChromeInstances } from "../../services/browser/browserDiscovery"
+import { discoverChromeHostUrl, tryChromeHostUrl } from "../../services/browser/browserDiscovery"
+import { searchWorkspaceFiles } from "../../services/search/file-search"
 import { fileExistsAtPath } from "../../utils/fs"
 import { playSound, setSoundEnabled, setSoundVolume } from "../../utils/sound"
+import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 import { searchCommits } from "../../utils/git"
 import { getDiffStrategy } from "../diff/DiffStrategy"
 import { SYSTEM_PROMPT } from "../prompts/system"
-import { ConfigManager } from "../config/ConfigManager"
+import { ContextProxy } from "../config/ContextProxy"
+import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import { exportSettings, importSettings } from "../config/importExport"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { ContextProxy } from "../contextProxy"
 import { buildApiHandler } from "../../api"
 import { getOpenRouterModels } from "../../api/providers/openrouter"
 import { getGlamaModels } from "../../api/providers/glama"
@@ -61,13 +79,18 @@ import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
 import { telemetryService } from "../../services/telemetry/TelemetryService"
 import { TelemetrySetting } from "../../shared/TelemetrySetting"
+import { getWorkspacePath } from "../../utils/path"
 
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
 
-export class ClineProvider implements vscode.WebviewViewProvider {
+export type ClineProviderEvents = {
+	clineCreated: [cline: Cline]
+}
+
+export class ClineProvider extends EventEmitter<ClineProviderEvents> implements vscode.WebviewViewProvider {
 	public static readonly sideBarId = "roo-cline.SidebarProvider" // used in package.json as the view's id. This value cannot be changed due to how vscode caches views based on their id, and updating the id would break existing instances of the extension.
 	public static readonly tabPanelId = "roo-cline.TabPanelProvider"
 	private static activeInstances: Set<ClineProvider> = new Set()
@@ -77,24 +100,31 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	private clineStack: Cline[] = []
 	private workspaceTracker?: WorkspaceTracker
 	protected mcpHub?: McpHub // Change from private to protected
-	private latestAnnouncementId = "mar-7-2025-3-8" // update to some unique identifier when we add a new announcement
+	private latestAnnouncementId = "mar-20-2025-3-10" // update to some unique identifier when we add a new announcement
+	private settingsImportedAt?: number
 	private contextProxy: ContextProxy
-	configManager: ConfigManager
-	customModesManager: CustomModesManager
+	public readonly providerSettingsManager: ProviderSettingsManager
+	public readonly customModesManager: CustomModesManager
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
 		private readonly outputChannel: vscode.OutputChannel,
+		private readonly renderContext: "sidebar" | "editor" = "sidebar",
 	) {
+		super()
+
 		this.outputChannel.appendLine("ClineProvider instantiated")
 		this.contextProxy = new ContextProxy(context)
 		ClineProvider.activeInstances.add(this)
 
-		// Register this provider with the telemetry service to enable it to add properties like mode and provider
+		// Register this provider with the telemetry service to enable it to add
+		// properties like mode and provider.
 		telemetryService.setProvider(this)
 
 		this.workspaceTracker = new WorkspaceTracker(this)
-		this.configManager = new ConfigManager(this.context)
+
+		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebview()
 		})
@@ -122,7 +152,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		const state = await this.getState()
 
 		if (!state || typeof state.mode !== "string") {
-			throw new Error("Error failed to retrieve current mode from state.")
+			throw new Error(t("common:errors.retrieve_current_mode"))
 		}
 	}
 
@@ -167,6 +197,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// returns the current clineStack length (how many cline objects are in the stack)
 	getClineStackSize(): number {
 		return this.clineStack.length
+	}
+
+	public getCurrentTaskStack(): string[] {
+		return this.clineStack.map((cline) => cline.taskId)
 	}
 
 	// remove the current task/cline instance (at the top of the stack), ao this task is finished
@@ -338,9 +372,20 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			setPanel(webviewView, "sidebar")
 		}
 
-		// Initialize sound enabled state
-		this.getState().then(({ soundEnabled }) => {
+		// Initialize out-of-scope variables that need to recieve persistent global state values
+		this.getState().then(({ soundEnabled, terminalShellIntegrationTimeout }) => {
 			setSoundEnabled(soundEnabled ?? false)
+			Terminal.setShellIntegrationTimeout(terminalShellIntegrationTimeout ?? TERMINAL_SHELL_INTEGRATION_TIMEOUT)
+		})
+
+		// Initialize tts enabled state
+		this.getState().then(({ ttsEnabled }) => {
+			setTtsEnabled(ttsEnabled ?? false)
+		})
+
+		// Initialize tts speed state
+		this.getState().then(({ ttsSpeed }) => {
+			setTtsSpeed(ttsSpeed ?? 1)
 		})
 
 		webviewView.webview.options = {
@@ -453,6 +498,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			rootTask: this.clineStack.length > 0 ? this.clineStack[0] : undefined,
 			parentTask,
 			taskNumber: this.clineStack.length + 1,
+			onCreated: (cline) => this.emit("clineCreated", cline),
 		})
 
 		await this.addClineToStack(cline)
@@ -482,7 +528,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 		const taskId = historyItem.id
 		const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
-		const workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? ""
+		const workspaceDir = this.cwd
 
 		const checkpoints: Pick<ClineOptions, "enableCheckpoints" | "checkpointStorage"> = {
 			enableCheckpoints,
@@ -518,6 +564,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			rootTask: historyItem.rootTask,
 			parentTask: historyItem.parentTask,
 			taskNumber: historyItem.number,
+			onCreated: (cline) => this.emit("clineCreated", cline),
 		})
 
 		await this.addClineToStack(cline)
@@ -539,20 +586,20 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		try {
 			await axios.get(`http://${localServerUrl}`)
 		} catch (error) {
-			vscode.window.showErrorMessage(
-				"Local development server is not running, HMR will not work. Please run 'npm run dev' before launching the extension to enable HMR.",
-			)
+			vscode.window.showErrorMessage(t("common:errors.hmr_not_running"))
 
 			return this.getHtmlContent(webview)
 		}
 
 		const nonce = getNonce()
+
 		const stylesUri = getUri(webview, this.contextProxy.extensionUri, [
 			"webview-ui",
 			"build",
 			"assets",
 			"index.css",
 		])
+
 		const codiconsUri = getUri(webview, this.contextProxy.extensionUri, [
 			"node_modules",
 			"@vscode",
@@ -560,6 +607,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			"dist",
 			"codicon.css",
 		])
+
+		const imagesUri = getUri(webview, this.contextProxy.extensionUri, ["assets", "images"])
 
 		const file = "src/index.tsx"
 		const scriptUri = `http://${localServerUrl}/${file}`
@@ -579,7 +628,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			`font-src ${webview.cspSource}`,
 			`style-src ${webview.cspSource} 'unsafe-inline' https://* http://${localServerUrl} http://0.0.0.0:${localPort}`,
 			`img-src ${webview.cspSource} data:`,
-			`script-src 'unsafe-eval' https://* https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
+			`script-src 'unsafe-eval' ${webview.cspSource} https://* https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
 			`connect-src https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
 		]
 
@@ -592,6 +641,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					<meta http-equiv="Content-Security-Policy" content="${csp.join("; ")}">
 					<link rel="stylesheet" type="text/css" href="${stylesUri}">
 					<link href="${codiconsUri}" rel="stylesheet" />
+					<script nonce="${nonce}">
+						window.IMAGES_BASE_URI = "${imagesUri}"
+					</script>
 					<title>Roo Code</title>
 				</head>
 				<body>
@@ -640,6 +692,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			"codicon.css",
 		])
 
+		const imagesUri = getUri(webview, this.contextProxy.extensionUri, ["assets", "images"])
+
 		// const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "assets", "main.js"))
 
 		// const styleResetUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "assets", "reset.css"))
@@ -669,9 +723,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}' https://us-assets.i.posthog.com; connect-src https://us.i.posthog.com https://us-assets.i.posthog.com;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}' https://us-assets.i.posthog.com; connect-src https://openrouter.ai https://us.i.posthog.com https://us-assets.i.posthog.com;">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
 			<link href="${codiconsUri}" rel="stylesheet" />
+			<script nonce="${nonce}">
+				window.IMAGES_BASE_URI = "${imagesUri}"
+			</script>
             <title>Roo Code</title>
           </head>
           <body>
@@ -833,7 +890,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							}
 						})
 
-						this.configManager
+						this.providerSettingsManager
 							.listConfig()
 							.then(async (listApiConfig) => {
 								if (!listApiConfig) {
@@ -841,25 +898,27 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								}
 
 								if (listApiConfig.length === 1) {
-									// check if first time init then sync with exist config
+									// Check if first time init then sync with exist config.
 									if (!checkExistKey(listApiConfig[0])) {
 										const { apiConfiguration } = await this.getState()
-										await this.configManager.saveConfig(
+
+										await this.providerSettingsManager.saveConfig(
 											listApiConfig[0].name ?? "default",
 											apiConfiguration,
 										)
+
 										listApiConfig[0].apiProvider = apiConfiguration.apiProvider
 									}
 								}
 
-								const currentConfigName = (await this.getGlobalState("currentApiConfigName")) as string
+								const currentConfigName = this.getGlobalState("currentApiConfigName")
 
 								if (currentConfigName) {
-									if (!(await this.configManager.hasConfig(currentConfigName))) {
+									if (!(await this.providerSettingsManager.hasConfig(currentConfigName))) {
 										// current config name not valid, get first config in list
 										await this.updateGlobalState("currentApiConfigName", listApiConfig?.[0]?.name)
 										if (listApiConfig?.[0]?.name) {
-											const apiConfig = await this.configManager.loadConfig(
+											const apiConfig = await this.providerSettingsManager.loadConfig(
 												listApiConfig?.[0]?.name,
 											)
 
@@ -918,8 +977,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.updateGlobalState("alwaysAllowReadOnly", message.bool ?? undefined)
 						await this.postStateToWebview()
 						break
+					case "alwaysAllowReadOnlyOutsideWorkspace":
+						await this.updateGlobalState("alwaysAllowReadOnlyOutsideWorkspace", message.bool ?? undefined)
+						await this.postStateToWebview()
+						break
 					case "alwaysAllowWrite":
 						await this.updateGlobalState("alwaysAllowWrite", message.bool ?? undefined)
+						await this.postStateToWebview()
+						break
+					case "alwaysAllowWriteOutsideWorkspace":
+						await this.updateGlobalState("alwaysAllowWriteOutsideWorkspace", message.bool ?? undefined)
 						await this.postStateToWebview()
 						break
 					case "alwaysAllowExecute":
@@ -951,7 +1018,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					case "clearTask":
 						// clear task resets the current session and allows for a new task to be started, if this session is a subtask - it allows the parent task to be resumed
-						await this.finishSubTask(`Task error: It was stopped and canceled by the user.`)
+						await this.finishSubTask(t("common:tasks.canceled"))
 						await this.postStateToWebview()
 						break
 					case "didShowAnnouncement":
@@ -974,8 +1041,72 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "deleteTaskWithId":
 						this.deleteTaskWithId(message.text!)
 						break
+					case "deleteMultipleTasksWithIds": {
+						const ids = message.ids
+
+						if (Array.isArray(ids)) {
+							// Process in batches of 20 (or another reasonable number)
+							const batchSize = 20
+							const results = []
+
+							// Only log start and end of the operation
+							console.log(`Batch deletion started: ${ids.length} tasks total`)
+
+							for (let i = 0; i < ids.length; i += batchSize) {
+								const batch = ids.slice(i, i + batchSize)
+
+								const batchPromises = batch.map(async (id) => {
+									try {
+										await this.deleteTaskWithId(id)
+										return { id, success: true }
+									} catch (error) {
+										// Keep error logging for debugging purposes
+										console.log(
+											`Failed to delete task ${id}: ${error instanceof Error ? error.message : String(error)}`,
+										)
+										return { id, success: false }
+									}
+								})
+
+								// Process each batch in parallel but wait for completion before starting the next batch
+								const batchResults = await Promise.all(batchPromises)
+								results.push(...batchResults)
+
+								// Update the UI after each batch to show progress
+								await this.postStateToWebview()
+							}
+
+							// Log final results
+							const successCount = results.filter((r) => r.success).length
+							const failCount = results.length - successCount
+							console.log(
+								`Batch deletion completed: ${successCount}/${ids.length} tasks successful, ${failCount} tasks failed`,
+							)
+						}
+						break
+					}
 					case "exportTaskWithId":
 						this.exportTaskWithId(message.text!)
+						break
+					case "importSettings":
+						const { success } = await importSettings({
+							providerSettingsManager: this.providerSettingsManager,
+							contextProxy: this.contextProxy,
+						})
+
+						if (success) {
+							this.settingsImportedAt = Date.now()
+							await this.postStateToWebview()
+							await vscode.window.showInformationMessage(t("common:info.settings_imported"))
+						}
+
+						break
+					case "exportSettings":
+						await exportSettings({
+							providerSettingsManager: this.providerSettingsManager,
+							contextProxy: this.contextProxy,
+						})
+
 						break
 					case "resetState":
 						await this.resetState()
@@ -1066,7 +1197,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						openFile(message.text!, message.values as { create?: boolean; content?: string })
 						break
 					case "openMention":
-						openMention(message.text)
+						{
+							const { osInfo } = (await this.getState()) || {}
+							openMention(message.text, osInfo)
+						}
 						break
 					case "checkpointDiff":
 						const result = checkoutDiffPayloadSchema.safeParse(message.payload)
@@ -1085,13 +1219,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							try {
 								await pWaitFor(() => this.getCurrentCline()?.isInitialized === true, { timeout: 3_000 })
 							} catch (error) {
-								vscode.window.showErrorMessage("Timed out when attempting to restore checkpoint.")
+								vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 							}
 
 							try {
 								await this.getCurrentCline()?.checkpointRestore(result.data)
 							} catch (error) {
-								vscode.window.showErrorMessage("Failed to restore checkpoint.")
+								vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 							}
 						}
 
@@ -1114,6 +1248,28 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						}
 						break
 					}
+					case "openProjectMcpSettings": {
+						if (!vscode.workspace.workspaceFolders?.length) {
+							vscode.window.showErrorMessage(t("common:no_workspace"))
+							return
+						}
+
+						const workspaceFolder = vscode.workspace.workspaceFolders[0]
+						const rooDir = path.join(workspaceFolder.uri.fsPath, ".roo")
+						const mcpPath = path.join(rooDir, "mcp.json")
+
+						try {
+							await fs.mkdir(rooDir, { recursive: true })
+							const exists = await fileExistsAtPath(mcpPath)
+							if (!exists) {
+								await fs.writeFile(mcpPath, JSON.stringify({ mcpServers: {} }, null, 2))
+							}
+							await openFile(mcpPath)
+						} catch (error) {
+							vscode.window.showErrorMessage(t("common:errors.create_mcp_json", { error: `${error}` }))
+						}
+						break
+					}
 					case "openCustomModesSettings": {
 						const customModesFilePath = await this.customModesManager.getCustomModesFilePath()
 						if (customModesFilePath) {
@@ -1128,7 +1284,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 						try {
 							this.outputChannel.appendLine(`Attempting to delete MCP server: ${message.serverName}`)
-							await this.mcpHub?.deleteServer(message.serverName)
+							await this.mcpHub?.deleteServer(message.serverName, message.source as "global" | "project")
 							this.outputChannel.appendLine(`Successfully deleted MCP server: ${message.serverName}`)
 						} catch (error) {
 							const errorMessage = error instanceof Error ? error.message : String(error)
@@ -1139,7 +1295,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "restartMcpServer": {
 						try {
-							await this.mcpHub?.restartConnection(message.text!)
+							await this.mcpHub?.restartConnection(message.text!, message.source as "global" | "project")
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Failed to retry connection for ${message.text}: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1149,11 +1305,14 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "toggleToolAlwaysAllow": {
 						try {
-							await this.mcpHub?.toggleToolAlwaysAllow(
-								message.serverName!,
-								message.toolName!,
-								message.alwaysAllow!,
-							)
+							if (this.mcpHub) {
+								await this.mcpHub.toggleToolAlwaysAllow(
+									message.serverName!,
+									message.source as "global" | "project",
+									message.toolName!,
+									Boolean(message.alwaysAllow),
+								)
+							}
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Failed to toggle auto-approve for tool ${message.toolName}: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1163,7 +1322,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "toggleMcpServer": {
 						try {
-							await this.mcpHub?.toggleServerDisabled(message.serverName!, message.disabled!)
+							await this.mcpHub?.toggleServerDisabled(
+								message.serverName!,
+								message.disabled!,
+								message.source as "global" | "project",
+							)
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Failed to toggle MCP server ${message.serverName}: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1198,6 +1361,29 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						setSoundVolume(soundVolume)
 						await this.postStateToWebview()
 						break
+					case "ttsEnabled":
+						const ttsEnabled = message.bool ?? true
+						await this.updateGlobalState("ttsEnabled", ttsEnabled)
+						setTtsEnabled(ttsEnabled) // Add this line to update the tts utility
+						await this.postStateToWebview()
+						break
+					case "ttsSpeed":
+						const ttsSpeed = message.value ?? 1.0
+						await this.updateGlobalState("ttsSpeed", ttsSpeed)
+						setTtsSpeed(ttsSpeed)
+						await this.postStateToWebview()
+						break
+					case "playTts":
+						if (message.text) {
+							playTts(message.text, {
+								onStart: () => this.postMessageToWebview({ type: "ttsStart", text: message.text }),
+								onStop: () => this.postMessageToWebview({ type: "ttsStop", text: message.text }),
+							})
+						}
+						break
+					case "stopTts":
+						stopTts()
+						break
 					case "diffEnabled":
 						const diffEnabled = message.bool ?? true
 						await this.updateGlobalState("diffEnabled", diffEnabled)
@@ -1211,7 +1397,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "checkpointStorage":
 						console.log(`[ClineProvider] checkpointStorage: ${message.text}`)
 						const checkpointStorage = message.text ?? "task"
-						await this.updateGlobalState("checkpointStorage", checkpointStorage)
+						await this.updateGlobalState("checkpointStorage", checkpointStorage as CheckpointStorage)
 						await this.postStateToWebview()
 						break
 					case "browserViewportSize":
@@ -1234,74 +1420,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.postStateToWebview()
 						break
 					case "testBrowserConnection":
-						try {
-							const browserSession = new BrowserSession(this.context)
-							// If no text is provided, try auto-discovery
-							if (!message.text) {
-								try {
-									const discoveredHost = await discoverChromeInstances()
-									if (discoveredHost) {
-										// Test the connection to the discovered host
-										const result = await browserSession.testConnection(discoveredHost)
-										// Send the result back to the webview
-										await this.postMessageToWebview({
-											type: "browserConnectionResult",
-											success: result.success,
-											text: `Auto-discovered and tested connection to Chrome at ${discoveredHost}: ${result.message}`,
-											values: { endpoint: result.endpoint },
-										})
-									} else {
-										await this.postMessageToWebview({
-											type: "browserConnectionResult",
-											success: false,
-											text: "No Chrome instances found on the network. Make sure Chrome is running with remote debugging enabled (--remote-debugging-port=9222).",
-										})
-									}
-								} catch (error) {
-									await this.postMessageToWebview({
-										type: "browserConnectionResult",
-										success: false,
-										text: `Error during auto-discovery: ${error instanceof Error ? error.message : String(error)}`,
-									})
-								}
-							} else {
-								// Test the provided URL
-								const result = await browserSession.testConnection(message.text)
-
+						// If no text is provided, try auto-discovery
+						if (!message.text) {
+							// Use testBrowserConnection for auto-discovery
+							const chromeHostUrl = await discoverChromeHostUrl()
+							if (chromeHostUrl) {
 								// Send the result back to the webview
 								await this.postMessageToWebview({
 									type: "browserConnectionResult",
-									success: result.success,
-									text: result.message,
-									values: { endpoint: result.endpoint },
-								})
-							}
-						} catch (error) {
-							await this.postMessageToWebview({
-								type: "browserConnectionResult",
-								success: false,
-								text: `Error testing connection: ${error instanceof Error ? error.message : String(error)}`,
-							})
-						}
-						break
-					case "discoverBrowser":
-						try {
-							const discoveredHost = await discoverChromeInstances()
-
-							if (discoveredHost) {
-								// Don't update the remoteBrowserHost state when auto-discovering
-								// This way we don't override the user's preference
-
-								// Test the connection to get the endpoint
-								const browserSession = new BrowserSession(this.context)
-								const result = await browserSession.testConnection(discoveredHost)
-
-								// Send the result back to the webview
-								await this.postMessageToWebview({
-									type: "browserConnectionResult",
-									success: true,
-									text: `Successfully discovered and connected to Chrome at ${discoveredHost}`,
-									values: { endpoint: result.endpoint },
+									success: !!chromeHostUrl,
+									text: `Auto-discovered and tested connection to Chrome: ${chromeHostUrl}`,
+									values: { endpoint: chromeHostUrl },
 								})
 							} else {
 								await this.postMessageToWebview({
@@ -1310,11 +1439,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 									text: "No Chrome instances found on the network. Make sure Chrome is running with remote debugging enabled (--remote-debugging-port=9222).",
 								})
 							}
-						} catch (error) {
+						} else {
+							// Test the provided URL
+							const customHostUrl = message.text
+							const hostIsValid = await tryChromeHostUrl(message.text)
+							// Send the result back to the webview
 							await this.postMessageToWebview({
 								type: "browserConnectionResult",
-								success: false,
-								text: `Error discovering browser: ${error instanceof Error ? error.message : String(error)}`,
+								success: hostIsValid,
+								text: hostIsValid
+									? `Successfully connected to Chrome: ${customHostUrl}`
+									: "Failed to connect to Chrome",
 							})
 						}
 						break
@@ -1342,6 +1477,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.updateGlobalState("terminalOutputLineLimit", message.value)
 						await this.postStateToWebview()
 						break
+					case "terminalShellIntegrationTimeout":
+						await this.updateGlobalState("terminalShellIntegrationTimeout", message.value)
+						await this.postStateToWebview()
+						if (message.value !== undefined) {
+							Terminal.setShellIntegrationTimeout(message.value)
+						}
+						break
 					case "mode":
 						await this.handleModeSwitch(message.text as Mode)
 						break
@@ -1351,20 +1493,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								return
 							}
 
-							const existingPrompts = (await this.getGlobalState("customSupportPrompts")) || {}
-
-							const updatedPrompts = {
-								...existingPrompts,
-								...message.values,
-							}
-
+							const existingPrompts = this.getGlobalState("customSupportPrompts") ?? {}
+							const updatedPrompts = { ...existingPrompts, ...message.values }
 							await this.updateGlobalState("customSupportPrompts", updatedPrompts)
 							await this.postStateToWebview()
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Error update support prompt: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 							)
-							vscode.window.showErrorMessage("Failed to update support prompt")
+							vscode.window.showErrorMessage(t("common:errors.update_support_prompt"))
 						}
 						break
 					case "resetSupportPrompt":
@@ -1373,59 +1510,38 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								return
 							}
 
-							const existingPrompts = ((await this.getGlobalState("customSupportPrompts")) ||
-								{}) as Record<string, any>
-
-							const updatedPrompts = {
-								...existingPrompts,
-							}
-
+							const existingPrompts = this.getGlobalState("customSupportPrompts") ?? {}
+							const updatedPrompts = { ...existingPrompts }
 							updatedPrompts[message.text] = undefined
-
 							await this.updateGlobalState("customSupportPrompts", updatedPrompts)
 							await this.postStateToWebview()
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Error reset support prompt: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 							)
-							vscode.window.showErrorMessage("Failed to reset support prompt")
+							vscode.window.showErrorMessage(t("common:errors.reset_support_prompt"))
 						}
 						break
 					case "updatePrompt":
 						if (message.promptMode && message.customPrompt !== undefined) {
-							const existingPrompts = (await this.getGlobalState("customModePrompts")) || {}
-
-							const updatedPrompts = {
-								...existingPrompts,
-								[message.promptMode]: message.customPrompt,
-							}
-
+							const existingPrompts = this.getGlobalState("customModePrompts") ?? {}
+							const updatedPrompts = { ...existingPrompts, [message.promptMode]: message.customPrompt }
 							await this.updateGlobalState("customModePrompts", updatedPrompts)
-
-							// Get current state and explicitly include customModePrompts
 							const currentState = await this.getState()
-
-							const stateWithPrompts = {
-								...currentState,
-								customModePrompts: updatedPrompts,
-							}
-
-							// Post state with prompts
-							this.view?.webview.postMessage({
-								type: "state",
-								state: stateWithPrompts,
-							})
+							const stateWithPrompts = { ...currentState, customModePrompts: updatedPrompts }
+							this.view?.webview.postMessage({ type: "state", state: stateWithPrompts })
 						}
 						break
 					case "deleteMessage": {
 						const answer = await vscode.window.showInformationMessage(
-							"What would you like to delete?",
+							t("common:confirmation.delete_message"),
 							{ modal: true },
-							"Just this message",
-							"This and all subsequent messages",
+							t("common:confirmation.just_this_message"),
+							t("common:confirmation.this_and_subsequent"),
 						)
 						if (
-							(answer === "Just this message" || answer === "This and all subsequent messages") &&
+							(answer === t("common:confirmation.just_this_message") ||
+								answer === t("common:confirmation.this_and_subsequent")) &&
 							this.getCurrentCline() &&
 							typeof message.value === "number" &&
 							message.value
@@ -1442,7 +1558,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							if (messageIndex !== -1) {
 								const { historyItem } = await this.getTaskWithId(this.getCurrentCline()!.taskId)
 
-								if (answer === "Just this message") {
+								if (answer === t("common:confirmation.just_this_message")) {
 									// Find the next user message first
 									const nextUserMessage = this.getCurrentCline()!
 										.clineMessages.slice(messageIndex + 1)
@@ -1489,7 +1605,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 											)
 										}
 									}
-								} else if (answer === "This and all subsequent messages") {
+								} else if (answer === t("common:confirmation.this_and_subsequent")) {
 									// Delete this message and all that follow
 									await this.getCurrentCline()!.overwriteClineMessages(
 										this.getCurrentCline()!.clineMessages.slice(0, messageIndex),
@@ -1528,19 +1644,35 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.postStateToWebview()
 						break
 					case "language":
-						await this.updateGlobalState("language", message.text)
+						changeLanguage(message.text ?? "en")
+						await this.updateGlobalState("language", message.text as Language)
 						await this.postStateToWebview()
 						break
 					case "showRooIgnoredFiles":
 						await this.updateGlobalState("showRooIgnoredFiles", message.bool ?? true)
 						await this.postStateToWebview()
 						break
-					case "enhancementApiConfigId":
-						await this.updateGlobalState("enhancementApiConfigId", message.text)
+					case "maxReadFileLine":
+						await this.updateGlobalState("maxReadFileLine", message.value)
 						await this.postStateToWebview()
 						break
-					case "enableCustomModeCreation":
-						await this.updateGlobalState("enableCustomModeCreation", message.bool ?? true)
+					case "toggleApiConfigPin":
+						if (message.text) {
+							const currentPinned = this.getGlobalState("pinnedApiConfigs") ?? {}
+							const updatedPinned: Record<string, boolean> = { ...currentPinned }
+
+							if (currentPinned[message.text]) {
+								delete updatedPinned[message.text]
+							} else {
+								updatedPinned[message.text] = true
+							}
+
+							await this.updateGlobalState("pinnedApiConfigs", updatedPinned)
+							await this.postStateToWebview()
+						}
+						break
+					case "enhancementApiConfigId":
+						await this.updateGlobalState("enhancementApiConfigId", message.text)
 						await this.postStateToWebview()
 						break
 					case "autoApprovalEnabled":
@@ -1564,7 +1696,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 										(c: ApiConfigMeta) => c.id === enhancementApiConfigId,
 									)
 									if (config?.name) {
-										const loadedConfig = await this.configManager.loadConfig(config.name)
+										const loadedConfig = await this.providerSettingsManager.loadConfig(config.name)
 										if (loadedConfig.apiProvider) {
 											configToUse = loadedConfig
 										}
@@ -1590,7 +1722,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								this.outputChannel.appendLine(
 									`Error enhancing prompt: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to enhance prompt")
+								vscode.window.showErrorMessage(t("common:errors.enhance_prompt"))
 								await this.postMessageToWebview({
 									type: "enhancedPrompt",
 								})
@@ -1610,7 +1742,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							this.outputChannel.appendLine(
 								`Error getting system prompt:  ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 							)
-							vscode.window.showErrorMessage("Failed to get system prompt")
+							vscode.window.showErrorMessage(t("common:errors.get_system_prompt"))
 						}
 						break
 					case "copySystemPrompt":
@@ -1618,16 +1750,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							const systemPrompt = await generateSystemPrompt(message)
 
 							await vscode.env.clipboard.writeText(systemPrompt)
-							await vscode.window.showInformationMessage("System prompt successfully copied to clipboard")
+							await vscode.window.showInformationMessage(t("common:info.clipboard_copy"))
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Error getting system prompt:  ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 							)
-							vscode.window.showErrorMessage("Failed to get system prompt")
+							vscode.window.showErrorMessage(t("common:errors.get_system_prompt"))
 						}
 						break
 					case "searchCommits": {
-						const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0)
+						const cwd = this.cwd
 						if (cwd) {
 							try {
 								const commits = await searchCommits(message.query || "", cwd)
@@ -1639,44 +1771,68 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								this.outputChannel.appendLine(
 									`Error searching commits: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to search commits")
+								vscode.window.showErrorMessage(t("common:errors.search_commits"))
 							}
+						}
+						break
+					}
+					case "searchFiles": {
+						const workspacePath = getWorkspacePath()
+
+						if (!workspacePath) {
+							// Handle case where workspace path is not available
+							await this.postMessageToWebview({
+								type: "fileSearchResults",
+								results: [],
+								requestId: message.requestId,
+								error: "No workspace path available",
+							})
+							break
+						}
+						try {
+							// Call file search service with query from message
+							const results = await searchWorkspaceFiles(
+								message.query || "",
+								workspacePath,
+								20, // Use default limit, as filtering is now done in the backend
+							)
+
+							// Send results back to webview
+							await this.postMessageToWebview({
+								type: "fileSearchResults",
+								results,
+								requestId: message.requestId,
+							})
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+
+							// Send error response to webview
+							await this.postMessageToWebview({
+								type: "fileSearchResults",
+								results: [],
+								error: errorMessage,
+								requestId: message.requestId,
+							})
 						}
 						break
 					}
 					case "saveApiConfiguration":
 						if (message.text && message.apiConfiguration) {
 							try {
-								await this.configManager.saveConfig(message.text, message.apiConfiguration)
-								const listApiConfig = await this.configManager.listConfig()
+								await this.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
+								const listApiConfig = await this.providerSettingsManager.listConfig()
 								await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 							} catch (error) {
 								this.outputChannel.appendLine(
 									`Error save api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to save api configuration")
+								vscode.window.showErrorMessage(t("common:errors.save_api_config"))
 							}
 						}
 						break
 					case "upsertApiConfiguration":
 						if (message.text && message.apiConfiguration) {
-							try {
-								await this.configManager.saveConfig(message.text, message.apiConfiguration)
-								const listApiConfig = await this.configManager.listConfig()
-
-								await Promise.all([
-									this.updateGlobalState("listApiConfigMeta", listApiConfig),
-									this.updateApiConfiguration(message.apiConfiguration),
-									this.updateGlobalState("currentApiConfigName", message.text),
-								])
-
-								await this.postStateToWebview()
-							} catch (error) {
-								this.outputChannel.appendLine(
-									`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
-								)
-								vscode.window.showErrorMessage("Failed to create api configuration")
-							}
+							await this.upsertApiConfiguration(message.text, message.apiConfiguration)
 						}
 						break
 					case "renameApiConfiguration":
@@ -1688,31 +1844,39 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 									break
 								}
 
-								await this.configManager.saveConfig(newName, message.apiConfiguration)
-								await this.configManager.deleteConfig(oldName)
+								// Load the old configuration to get its ID
+								const oldConfig = await this.providerSettingsManager.loadConfig(oldName)
 
-								const listApiConfig = await this.configManager.listConfig()
-								const config = listApiConfig?.find((c) => c.name === newName)
+								// Create a new configuration with the same ID
+								const newConfig = {
+									...message.apiConfiguration,
+									id: oldConfig.id, // Preserve the ID
+								}
+
+								// Save with the new name but same ID
+								await this.providerSettingsManager.saveConfig(newName, newConfig)
+								await this.providerSettingsManager.deleteConfig(oldName)
+
+								const listApiConfig = await this.providerSettingsManager.listConfig()
 
 								// Update listApiConfigMeta first to ensure UI has latest data
 								await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-
-								await Promise.all([this.updateGlobalState("currentApiConfigName", newName)])
+								await this.updateGlobalState("currentApiConfigName", newName)
 
 								await this.postStateToWebview()
 							} catch (error) {
 								this.outputChannel.appendLine(
 									`Error rename api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to rename api configuration")
+								vscode.window.showErrorMessage(t("common:errors.rename_api_config"))
 							}
 						}
 						break
 					case "loadApiConfiguration":
 						if (message.text) {
 							try {
-								const apiConfig = await this.configManager.loadConfig(message.text)
-								const listApiConfig = await this.configManager.listConfig()
+								const apiConfig = await this.providerSettingsManager.loadConfig(message.text)
+								const listApiConfig = await this.providerSettingsManager.listConfig()
 
 								await Promise.all([
 									this.updateGlobalState("listApiConfigMeta", listApiConfig),
@@ -1725,33 +1889,59 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								this.outputChannel.appendLine(
 									`Error load api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to load api configuration")
+								vscode.window.showErrorMessage(t("common:errors.load_api_config"))
+							}
+						}
+						break
+					case "loadApiConfigurationById":
+						if (message.text) {
+							try {
+								const { config: apiConfig, name } = await this.providerSettingsManager.loadConfigById(
+									message.text,
+								)
+								const listApiConfig = await this.providerSettingsManager.listConfig()
+
+								await Promise.all([
+									this.updateGlobalState("listApiConfigMeta", listApiConfig),
+									this.updateGlobalState("currentApiConfigName", name),
+									this.updateApiConfiguration(apiConfig),
+								])
+
+								await this.postStateToWebview()
+							} catch (error) {
+								this.outputChannel.appendLine(
+									`Error load api configuration by ID: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+								)
+								vscode.window.showErrorMessage(t("common:errors.load_api_config"))
 							}
 						}
 						break
 					case "deleteApiConfiguration":
 						if (message.text) {
 							const answer = await vscode.window.showInformationMessage(
-								"Are you sure you want to delete this configuration profile?",
+								t("common:confirmation.delete_config_profile"),
 								{ modal: true },
-								"Yes",
+								t("common:answers.yes"),
 							)
 
-							if (answer !== "Yes") {
+							if (answer !== t("common:answers.yes")) {
 								break
 							}
 
 							try {
-								await this.configManager.deleteConfig(message.text)
-								const listApiConfig = await this.configManager.listConfig()
+								await this.providerSettingsManager.deleteConfig(message.text)
+								const listApiConfig = await this.providerSettingsManager.listConfig()
 
 								// Update listApiConfigMeta first to ensure UI has latest data
 								await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 
 								// If this was the current config, switch to first available
-								const currentApiConfigName = await this.getGlobalState("currentApiConfigName")
+								const currentApiConfigName = this.getGlobalState("currentApiConfigName")
+
 								if (message.text === currentApiConfigName && listApiConfig?.[0]?.name) {
-									const apiConfig = await this.configManager.loadConfig(listApiConfig[0].name)
+									const apiConfig = await this.providerSettingsManager.loadConfig(
+										listApiConfig[0].name,
+									)
 									await Promise.all([
 										this.updateGlobalState("currentApiConfigName", listApiConfig[0].name),
 										this.updateApiConfiguration(apiConfig),
@@ -1763,20 +1953,20 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								this.outputChannel.appendLine(
 									`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to delete api configuration")
+								vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
 							}
 						}
 						break
 					case "getListApiConfiguration":
 						try {
-							const listApiConfig = await this.configManager.listConfig()
+							const listApiConfig = await this.providerSettingsManager.listConfig()
 							await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 							this.postMessageToWebview({ type: "listApiConfig", listApiConfig })
 						} catch (error) {
 							this.outputChannel.appendLine(
 								`Error get list api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 							)
-							vscode.window.showErrorMessage("Failed to get list api configuration")
+							vscode.window.showErrorMessage(t("common:errors.list_api_config"))
 						}
 						break
 					case "updateExperimental": {
@@ -1785,9 +1975,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						}
 
 						const updatedExperiments = {
-							...((await this.getGlobalState("experiments")) ?? experimentDefault),
+							...(this.getGlobalState("experiments") ?? experimentDefault),
 							...message.values,
-						} as Record<ExperimentId, boolean>
+						}
 
 						await this.updateGlobalState("experiments", updatedExperiments)
 
@@ -1805,12 +1995,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "updateMcpTimeout":
 						if (message.serverName && typeof message.timeout === "number") {
 							try {
-								await this.mcpHub?.updateServerTimeout(message.serverName, message.timeout)
+								await this.mcpHub?.updateServerTimeout(
+									message.serverName,
+									message.timeout,
+									message.source as "global" | "project",
+								)
 							} catch (error) {
 								this.outputChannel.appendLine(
 									`Failed to update timeout for ${message.serverName}: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 								)
-								vscode.window.showErrorMessage("Failed to update server timeout")
+								vscode.window.showErrorMessage(t("common:errors.update_server_timeout"))
 							}
 						}
 						break
@@ -1827,12 +2021,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "deleteCustomMode":
 						if (message.slug) {
 							const answer = await vscode.window.showInformationMessage(
-								"Are you sure you want to delete this custom mode?",
+								t("common:confirmation.delete_custom_mode"),
 								{ modal: true },
-								"Yes",
+								t("common:answers.yes"),
 							)
 
-							if (answer !== "Yes") {
+							if (answer !== t("common:answers.yes")) {
 								break
 							}
 
@@ -1887,6 +2081,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				experiments,
 				enableMcpServerCreation,
 				browserToolEnabled,
+				language,
 			} = await this.getState()
 
 			// Create diffStrategy based on current model and settings
@@ -1894,17 +2089,34 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				apiConfiguration.apiModelId || apiConfiguration.openRouterModelId || "",
 				fuzzyMatchThreshold,
 				Experiments.isEnabled(experiments, EXPERIMENT_IDS.DIFF_STRATEGY),
+				Experiments.isEnabled(experiments, EXPERIMENT_IDS.MULTI_SEARCH_AND_REPLACE),
 			)
-			const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) || ""
+			const cwd = this.cwd
 
 			const mode = message.mode ?? defaultModeSlug
 			const customModes = await this.customModesManager.getCustomModes()
 
 			const rooIgnoreInstructions = this.getCurrentCline()?.rooIgnoreController?.getInstructions()
 
-			// Determine if browser tools can be used based on model support and user settings
-			const modelSupportsComputerUse = this.getCurrentCline()?.api.getModel().info.supportsComputerUse ?? false
-			const canUseBrowserTool = modelSupportsComputerUse && (browserToolEnabled ?? true)
+			// Determine if browser tools can be used based on model support, mode, and user settings
+			let modelSupportsComputerUse = false
+
+			// Create a temporary API handler to check if the model supports computer use
+			// This avoids relying on an active Cline instance which might not exist during preview
+			try {
+				const tempApiHandler = buildApiHandler(apiConfiguration)
+				modelSupportsComputerUse = tempApiHandler.getModel().info.supportsComputerUse ?? false
+			} catch (error) {
+				console.error("Error checking if model supports computer use:", error)
+			}
+
+			// Check if the current mode includes the browser tool group
+			const modeConfig = getModeBySlug(mode, customModes)
+			const modeSupportsBrowser = modeConfig?.groups.some((group) => getGroupName(group) === "browser") ?? false
+
+			// Only enable browser tools if the model supports it, the mode includes browser tools,
+			// and browser tools are enabled in settings
+			const canUseBrowserTool = modelSupportsComputerUse && modeSupportsBrowser && (browserToolEnabled ?? true)
 
 			const systemPrompt = await SYSTEM_PROMPT(
 				this.context,
@@ -1920,6 +2132,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				diffEnabled,
 				experiments,
 				enableMcpServerCreation,
+				language,
 				rooIgnoreInstructions,
 			)
 			return systemPrompt
@@ -1940,8 +2153,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		await this.updateGlobalState("mode", newMode)
 
 		// Load the saved API config for the new mode if it exists
-		const savedConfigId = await this.configManager.getModeConfigId(newMode)
-		const listApiConfig = await this.configManager.listConfig()
+		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		// Update listApiConfigMeta first to ensure UI has latest data
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -1950,7 +2163,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		if (savedConfigId) {
 			const config = listApiConfig?.find((c) => c.id === savedConfigId)
 			if (config?.name) {
-				const apiConfig = await this.configManager.loadConfig(config.name)
+				const apiConfig = await this.providerSettingsManager.loadConfig(config.name)
 				await Promise.all([
 					this.updateGlobalState("currentApiConfigName", config.name),
 					this.updateApiConfiguration(apiConfig),
@@ -1958,11 +2171,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			}
 		} else {
 			// If no saved config for this mode, save current config as default
-			const currentApiConfigName = await this.getGlobalState("currentApiConfigName")
+			const currentApiConfigName = this.getGlobalState("currentApiConfigName")
+
 			if (currentApiConfigName) {
 				const config = listApiConfig?.find((c) => c.name === currentApiConfigName)
 				if (config?.id) {
-					await this.configManager.setModeConfig(newMode, config.id)
+					await this.providerSettingsManager.setModeConfig(newMode, config.id)
 				}
 			}
 		}
@@ -1970,24 +2184,24 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		await this.postStateToWebview()
 	}
 
-	private async updateApiConfiguration(apiConfiguration: ApiConfiguration) {
+	private async updateApiConfiguration(providerSettings: ProviderSettings) {
 		// Update mode's default config.
 		const { mode } = await this.getState()
 
 		if (mode) {
-			const currentApiConfigName = await this.getGlobalState("currentApiConfigName")
-			const listApiConfig = await this.configManager.listConfig()
+			const currentApiConfigName = this.getGlobalState("currentApiConfigName")
+			const listApiConfig = await this.providerSettingsManager.listConfig()
 			const config = listApiConfig?.find((c) => c.name === currentApiConfigName)
 
 			if (config?.id) {
-				await this.configManager.setModeConfig(mode, config.id)
+				await this.providerSettingsManager.setModeConfig(mode, config.id)
 			}
 		}
 
-		await this.contextProxy.setValues(apiConfiguration)
+		await this.contextProxy.setProviderSettings(providerSettings)
 
 		if (this.getCurrentCline()) {
-			this.getCurrentCline()!.api = buildApiHandler(apiConfiguration)
+			this.getCurrentCline()!.api = buildApiHandler(providerSettings)
 		}
 	}
 
@@ -2071,15 +2285,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	async ensureSettingsDirectoryExists(): Promise<string> {
-		const settingsDir = path.join(this.contextProxy.globalStorageUri.fsPath, "settings")
-		await fs.mkdir(settingsDir, { recursive: true })
-		return settingsDir
+		const { getSettingsDirectoryPath } = await import("../../shared/storagePathManager")
+		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+		return getSettingsDirectoryPath(globalStoragePath)
 	}
 
 	private async ensureCacheDirectoryExists() {
-		const cacheDir = path.join(this.contextProxy.globalStorageUri.fsPath, "cache")
-		await fs.mkdir(cacheDir, { recursive: true })
-		return cacheDir
+		const { getCacheDirectoryPath } = await import("../../shared/storagePathManager")
+		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+		return getCacheDirectoryPath(globalStoragePath)
 	}
 
 	private async readModelsFromCache(filename: string): Promise<Record<string, ModelInfo> | undefined> {
@@ -2097,9 +2311,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// OpenRouter
 
 	async handleOpenRouterCallback(code: string) {
+		let { apiConfiguration, currentApiConfigName } = await this.getState()
+
 		let apiKey: string
 		try {
-			const { apiConfiguration } = await this.getState()
 			const baseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 			// Extract the base domain for the auth endpoint
 			const baseUrlDomain = baseUrl.match(/^(https?:\/\/[^\/]+)/)?.[1] || "https://openrouter.ai"
@@ -2116,17 +2331,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			throw error
 		}
 
-		const openrouter: ApiProvider = "openrouter"
-		await this.contextProxy.setValues({
-			apiProvider: openrouter,
+		const newConfiguration: ApiConfiguration = {
+			...apiConfiguration,
+			apiProvider: "openrouter",
 			openRouterApiKey: apiKey,
-		})
-
-		await this.postStateToWebview()
-		if (this.getCurrentCline()) {
-			this.getCurrentCline()!.api = buildApiHandler({ apiProvider: openrouter, openRouterApiKey: apiKey })
+			openRouterModelId: apiConfiguration?.openRouterModelId || openRouterDefaultModelId,
+			openRouterModelInfo: apiConfiguration?.openRouterModelInfo || openRouterDefaultModelInfo,
 		}
-		// await this.postMessageToWebview({ type: "action", action: "settingsButtonClicked" }) // bad ux if user is on welcome
+
+		await this.upsertApiConfiguration(currentApiConfigName, newConfiguration)
 	}
 
 	// Glama
@@ -2147,19 +2360,55 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			throw error
 		}
 
-		const glama: ApiProvider = "glama"
-		await this.contextProxy.setValues({
-			apiProvider: glama,
+		const { apiConfiguration, currentApiConfigName } = await this.getState()
+
+		const newConfiguration: ApiConfiguration = {
+			...apiConfiguration,
+			apiProvider: "glama",
 			glamaApiKey: apiKey,
-		})
-		await this.postStateToWebview()
-		if (this.getCurrentCline()) {
-			this.getCurrentCline()!.api = buildApiHandler({
-				apiProvider: glama,
-				glamaApiKey: apiKey,
-			})
+			glamaModelId: apiConfiguration?.glamaModelId || glamaDefaultModelId,
+			glamaModelInfo: apiConfiguration?.glamaModelInfo || glamaDefaultModelInfo,
 		}
-		// await this.postMessageToWebview({ type: "action", action: "settingsButtonClicked" }) // bad ux if user is on welcome
+
+		await this.upsertApiConfiguration(currentApiConfigName, newConfiguration)
+	}
+
+	// Requesty
+
+	async handleRequestyCallback(code: string) {
+		let { apiConfiguration, currentApiConfigName } = await this.getState()
+
+		const newConfiguration: ApiConfiguration = {
+			...apiConfiguration,
+			apiProvider: "requesty",
+			requestyApiKey: code,
+			requestyModelId: apiConfiguration?.requestyModelId || requestyDefaultModelId,
+			requestyModelInfo: apiConfiguration?.requestyModelInfo || requestyDefaultModelInfo,
+		}
+
+		await this.upsertApiConfiguration(currentApiConfigName, newConfiguration)
+	}
+
+	// Save configuration
+
+	async upsertApiConfiguration(configName: string, apiConfiguration: ApiConfiguration) {
+		try {
+			await this.providerSettingsManager.saveConfig(configName, apiConfiguration)
+			const listApiConfig = await this.providerSettingsManager.listConfig()
+
+			await Promise.all([
+				this.updateGlobalState("listApiConfigMeta", listApiConfig),
+				this.updateApiConfiguration(apiConfiguration),
+				this.updateGlobalState("currentApiConfigName", configName),
+			])
+
+			await this.postStateToWebview()
+		} catch (error) {
+			this.outputChannel.appendLine(
+				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+			)
+			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
+		}
 	}
 
 	// Task history
@@ -2171,15 +2420,20 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		uiMessagesFilePath: string
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
-		const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[] | undefined) || []
+		const history = this.getGlobalState("taskHistory") ?? []
 		const historyItem = history.find((item) => item.id === id)
+
 		if (historyItem) {
-			const taskDirPath = path.join(this.contextProxy.globalStorageUri.fsPath, "tasks", id)
+			const { getTaskDirectoryPath } = await import("../../shared/storagePathManager")
+			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+			const taskDirPath = await getTaskDirectoryPath(globalStoragePath, id)
 			const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 			const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
 			const fileExists = await fileExistsAtPath(apiConversationHistoryFilePath)
+
 			if (fileExists) {
 				const apiConversationHistory = JSON.parse(await fs.readFile(apiConversationHistoryFilePath, "utf8"))
+
 				return {
 					historyItem,
 					taskDirPath,
@@ -2189,6 +2443,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+
 		// if we tried to get a task that doesn't exist, remove it from state
 		// FIXME: this seems to happen sometimes when the json file doesnt save to disk for some reason
 		await this.deleteTaskFromState(id)
@@ -2212,53 +2467,56 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// this function deletes a task from task hidtory, and deletes it's checkpoints and delete the task folder
 	async deleteTaskWithId(id: string) {
-		// get the task directory full path
-		const { taskDirPath } = await this.getTaskWithId(id)
-
-		// remove task from stack if it's the current task
-		if (id === this.getCurrentCline()?.taskId) {
-			// if we found the taskid to delete - call finish to abort this task and allow a new task to be started,
-			// if we are deleting a subtask and parent task is still waiting for subtask to finish - it allows the parent to resume (this case should neve exist)
-			await this.finishSubTask(`Task failure: It was stopped and deleted by the user.`)
-		}
-
-		// delete task from the task history state
-		await this.deleteTaskFromState(id)
-
-		// get the base directory of the project
-		const baseDir = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0)
-
-		// Delete associated shadow repository or branch.
-		// TODO: Store `workspaceDir` in the `HistoryItem` object.
-		const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
-		const workspaceDir = baseDir ?? ""
-
 		try {
-			await ShadowCheckpointService.deleteTask({ taskId: id, globalStorageDir, workspaceDir })
-		} catch (error) {
-			console.error(
-				`[deleteTaskWithId${id}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
-			)
-		}
+			// get the task directory full path
+			const { taskDirPath } = await this.getTaskWithId(id)
 
-		// delete the entire task directory including checkpoints and all content
-		try {
-			await fs.rm(taskDirPath, { recursive: true, force: true })
-			console.log(`[deleteTaskWithId${id}] removed task directory`)
+			// remove task from stack if it's the current task
+			if (id === this.getCurrentCline()?.taskId) {
+				// if we found the taskid to delete - call finish to abort this task and allow a new task to be started,
+				// if we are deleting a subtask and parent task is still waiting for subtask to finish - it allows the parent to resume (this case should neve exist)
+				await this.finishSubTask(t("common:tasks.deleted"))
+			}
+
+			// delete task from the task history state
+			await this.deleteTaskFromState(id)
+
+			// Delete associated shadow repository or branch.
+			// TODO: Store `workspaceDir` in the `HistoryItem` object.
+			const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
+			const workspaceDir = this.cwd
+
+			try {
+				await ShadowCheckpointService.deleteTask({ taskId: id, globalStorageDir, workspaceDir })
+			} catch (error) {
+				console.error(
+					`[deleteTaskWithId${id}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			// delete the entire task directory including checkpoints and all content
+			try {
+				await fs.rm(taskDirPath, { recursive: true, force: true })
+				console.log(`[deleteTaskWithId${id}] removed task directory`)
+			} catch (error) {
+				console.error(
+					`[deleteTaskWithId${id}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 		} catch (error) {
-			console.error(
-				`[deleteTaskWithId${id}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
-			)
+			// If task is not found, just remove it from state
+			if (error instanceof Error && error.message === "Task not found") {
+				await this.deleteTaskFromState(id)
+				return
+			}
+			throw error
 		}
 	}
 
 	async deleteTaskFromState(id: string) {
-		// Remove the task from history
-		const taskHistory = ((await this.getGlobalState("taskHistory")) as HistoryItem[]) || []
+		const taskHistory = this.getGlobalState("taskHistory") ?? []
 		const updatedTaskHistory = taskHistory.filter((task) => task.id !== id)
 		await this.updateGlobalState("taskHistory", updatedTaskHistory)
-
-		// Notify the webview that the task has been deleted
 		await this.postStateToWebview()
 	}
 
@@ -2273,13 +2531,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			lastShownAnnouncementId,
 			customInstructions,
 			alwaysAllowReadOnly,
+			alwaysAllowReadOnlyOutsideWorkspace,
 			alwaysAllowWrite,
+			alwaysAllowWriteOutsideWorkspace,
 			alwaysAllowExecute,
 			alwaysAllowBrowser,
 			alwaysAllowMcp,
 			alwaysAllowModeSwitch,
 			alwaysAllowSubtasks,
 			soundEnabled,
+			ttsEnabled,
+			ttsSpeed,
 			diffEnabled,
 			enableCheckpoints,
 			checkpointStorage,
@@ -2289,8 +2551,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			screenshotQuality,
 			remoteBrowserHost,
 			remoteBrowserEnabled,
+			cachedChromeHostUrl,
 			writeDelayMs,
 			terminalOutputLineLimit,
+			terminalShellIntegrationTimeout,
 			fuzzyMatchThreshold,
 			mcpEnabled,
 			enableMcpServerCreation,
@@ -2299,6 +2563,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			rateLimitSeconds,
 			currentApiConfigName,
 			listApiConfigMeta,
+			pinnedApiConfigs,
 			mode,
 			customModePrompts,
 			customSupportPrompts,
@@ -2311,20 +2576,23 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			telemetrySetting,
 			showRooIgnoredFiles,
 			language,
+			maxReadFileLine,
 		} = await this.getState()
+
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
-
 		const allowedCommands = vscode.workspace.getConfiguration("roo-cline").get<string[]>("allowedCommands") || []
-
-		const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) || ""
+		const cwd = this.cwd
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
+			osInfo: os.platform() === "win32" ? "win32" : "unix",
 			apiConfiguration,
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
+			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
 			alwaysAllowWrite: alwaysAllowWrite ?? false,
+			alwaysAllowWriteOutsideWorkspace: alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowExecute: alwaysAllowExecute ?? false,
 			alwaysAllowBrowser: alwaysAllowBrowser ?? false,
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
@@ -2339,6 +2607,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				.filter((item: HistoryItem) => item.ts && item.task)
 				.sort((a: HistoryItem, b: HistoryItem) => b.ts - a.ts),
 			soundEnabled: soundEnabled ?? false,
+			ttsEnabled: ttsEnabled ?? false,
+			ttsSpeed: ttsSpeed ?? 1.0,
 			diffEnabled: diffEnabled ?? true,
 			enableCheckpoints: enableCheckpoints ?? true,
 			checkpointStorage: checkpointStorage ?? "task",
@@ -2350,8 +2620,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			screenshotQuality: screenshotQuality ?? 75,
 			remoteBrowserHost,
 			remoteBrowserEnabled: remoteBrowserEnabled ?? false,
+			cachedChromeHostUrl: cachedChromeHostUrl,
 			writeDelayMs: writeDelayMs ?? 1000,
 			terminalOutputLineLimit: terminalOutputLineLimit ?? 500,
+			terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? TERMINAL_SHELL_INTEGRATION_TIMEOUT,
 			fuzzyMatchThreshold: fuzzyMatchThreshold ?? 1.0,
 			mcpEnabled: mcpEnabled ?? true,
 			enableMcpServerCreation: enableMcpServerCreation ?? true,
@@ -2360,6 +2632,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			rateLimitSeconds: rateLimitSeconds ?? 0,
 			currentApiConfigName: currentApiConfigName ?? "default",
 			listApiConfigMeta: listApiConfigMeta ?? [],
+			pinnedApiConfigs: pinnedApiConfigs ?? {},
 			mode: mode ?? defaultModeSlug,
 			customModePrompts: customModePrompts ?? {},
 			customSupportPrompts: customSupportPrompts ?? {},
@@ -2377,119 +2650,44 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			machineId,
 			showRooIgnoredFiles: showRooIgnoredFiles ?? true,
 			language,
+			renderContext: this.renderContext,
+			maxReadFileLine: maxReadFileLine ?? 500,
+			settingsImportedAt: this.settingsImportedAt,
 		}
 	}
 
-	// Caching mechanism to keep track of webview messages + API conversation history per provider instance
-
-	/*
-	Now that we use retainContextWhenHidden, we don't have to store a cache of cline messages in the user's state, but we could to reduce memory footprint in long conversations.
-
-	- We have to be careful of what state is shared between ClineProvider instances since there could be multiple instances of the extension running at once. For example when we cached cline messages using the same key, two instances of the extension could end up using the same key and overwriting each other's messages.
-	- Some state does need to be shared between the instances, i.e. the API key--however there doesn't seem to be a good way to notfy the other instances that the API key has changed.
-
-	We need to use a unique identifier for each ClineProvider instance's message cache since we could be running several instances of the extension outside of just the sidebar i.e. in editor panels.
-
-	// conversation history to send in API requests
-
-	/*
-	It seems that some API messages do not comply with vscode state requirements. Either the Anthropic library is manipulating these values somehow in the backend in a way thats creating cyclic references, or the API returns a function or a Symbol as part of the message content.
-	VSCode docs about state: "The value must be JSON-stringifyable ... value — A value. MUST not contain cyclic references."
-	For now we'll store the conversation history in memory, and if we need to store in state directly we'd need to do a manual conversion to ensure proper json stringification.
-	*/
-
-	// getApiConversationHistory(): Anthropic.MessageParam[] {
-	// 	// const history = (await this.getGlobalState(
-	// 	// 	this.getApiConversationHistoryStateKey()
-	// 	// )) as Anthropic.MessageParam[]
-	// 	// return history || []
-	// 	return this.apiConversationHistory
-	// }
-
-	// setApiConversationHistory(history: Anthropic.MessageParam[] | undefined) {
-	// 	// await this.updateGlobalState(this.getApiConversationHistoryStateKey(), history)
-	// 	this.apiConversationHistory = history || []
-	// }
-
-	// addMessageToApiConversationHistory(message: Anthropic.MessageParam): Anthropic.MessageParam[] {
-	// 	// const history = await this.getApiConversationHistory()
-	// 	// history.push(message)
-	// 	// await this.setApiConversationHistory(history)
-	// 	// return history
-	// 	this.apiConversationHistory.push(message)
-	// 	return this.apiConversationHistory
-	// }
-
-	/*
-	Storage
-	https://dev.to/kompotkot/how-to-use-secretstorage-in-your-vscode-extensions-2hco
-	https://www.eliostruyf.com/devhack-code-extension-storage-options/
-	*/
+	/**
+	 * Storage
+	 * https://dev.to/kompotkot/how-to-use-secretstorage-in-your-vscode-extensions-2hco
+	 * https://www.eliostruyf.com/devhack-code-extension-storage-options/
+	 */
 
 	async getState() {
-		// Create an object to store all fetched values
-		const stateValues: Record<GlobalStateKey | SecretKey, any> = {} as Record<GlobalStateKey | SecretKey, any>
-		const secretValues: Record<SecretKey, any> = {} as Record<SecretKey, any>
+		const stateValues = this.contextProxy.getValues()
 
-		// Create promise arrays for global state and secrets
-		const statePromises = GLOBAL_STATE_KEYS.map((key) => this.getGlobalState(key))
-		const secretPromises = SECRET_KEYS.map((key) => this.getSecret(key))
+		const customModes = await this.customModesManager.getCustomModes()
 
-		// Add promise for custom modes which is handled separately
-		const customModesPromise = this.customModesManager.getCustomModes()
+		// Determine apiProvider with the same logic as before.
+		const apiProvider: ApiProvider = stateValues.apiProvider ? stateValues.apiProvider : "anthropic"
 
-		let idx = 0
-		const valuePromises = await Promise.all([...statePromises, ...secretPromises, customModesPromise])
-
-		// Populate stateValues and secretValues
-		GLOBAL_STATE_KEYS.forEach((key, _) => {
-			stateValues[key] = valuePromises[idx]
-			idx = idx + 1
-		})
-
-		SECRET_KEYS.forEach((key, index) => {
-			secretValues[key] = valuePromises[idx]
-			idx = idx + 1
-		})
-
-		let customModes = valuePromises[idx] as ModeConfig[] | undefined
-
-		// Determine apiProvider with the same logic as before
-		let apiProvider: ApiProvider
-		if (stateValues.apiProvider) {
-			apiProvider = stateValues.apiProvider
-		} else {
-			// Either new user or legacy user that doesn't have the apiProvider stored in state
-			// (If they're using OpenRouter or Bedrock, then apiProvider state will exist)
-			if (secretValues.apiKey) {
-				apiProvider = "anthropic"
-			} else {
-				// New users should default to openrouter
-				apiProvider = "openrouter"
-			}
-		}
-
-		// Build the apiConfiguration object combining state values and secrets
-		// Using the dynamic approach with API_CONFIG_KEYS
-		const apiConfiguration: ApiConfiguration = {
-			// Dynamically add all API-related keys from stateValues
-			...Object.fromEntries(API_CONFIG_KEYS.map((key) => [key, stateValues[key]])),
-			// Add all secrets
-			...secretValues,
-		}
+		// Build the apiConfiguration object combining state values and secrets.
+		const providerSettings = this.contextProxy.getProviderSettings()
 
 		// Ensure apiProvider is set properly if not already in state
-		if (!apiConfiguration.apiProvider) {
-			apiConfiguration.apiProvider = apiProvider
+		if (!providerSettings.apiProvider) {
+			providerSettings.apiProvider = apiProvider
 		}
 
 		// Return the same structure as before
 		return {
-			apiConfiguration,
+			apiConfiguration: providerSettings,
+			osInfo: os.platform() === "win32" ? "win32" : "unix",
 			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
 			customInstructions: stateValues.customInstructions,
 			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,
+			alwaysAllowReadOnlyOutsideWorkspace: stateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
 			alwaysAllowWrite: stateValues.alwaysAllowWrite ?? false,
+			alwaysAllowWriteOutsideWorkspace: stateValues.alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
 			alwaysAllowBrowser: stateValues.alwaysAllowBrowser ?? false,
 			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
@@ -2498,6 +2696,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			taskHistory: stateValues.taskHistory,
 			allowedCommands: stateValues.allowedCommands,
 			soundEnabled: stateValues.soundEnabled ?? false,
+			ttsEnabled: stateValues.ttsEnabled ?? false,
+			ttsSpeed: stateValues.ttsSpeed ?? 1.0,
 			diffEnabled: stateValues.diffEnabled ?? true,
 			enableCheckpoints: stateValues.enableCheckpoints ?? true,
 			checkpointStorage: stateValues.checkpointStorage ?? "task",
@@ -2506,11 +2706,14 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			screenshotQuality: stateValues.screenshotQuality ?? 75,
 			remoteBrowserHost: stateValues.remoteBrowserHost,
 			remoteBrowserEnabled: stateValues.remoteBrowserEnabled ?? false,
+			cachedChromeHostUrl: stateValues.cachedChromeHostUrl as string | undefined,
 			fuzzyMatchThreshold: stateValues.fuzzyMatchThreshold ?? 1.0,
 			writeDelayMs: stateValues.writeDelayMs ?? 1000,
 			terminalOutputLineLimit: stateValues.terminalOutputLineLimit ?? 500,
+			terminalShellIntegrationTimeout:
+				stateValues.terminalShellIntegrationTimeout ?? TERMINAL_SHELL_INTEGRATION_TIMEOUT,
 			mode: stateValues.mode ?? defaultModeSlug,
-			language: stateValues.language || formatLanguage(vscode.env.language),
+			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
 			enableMcpServerCreation: stateValues.enableMcpServerCreation ?? true,
 			alwaysApproveResubmit: stateValues.alwaysApproveResubmit ?? false,
@@ -2518,6 +2721,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			rateLimitSeconds: stateValues.rateLimitSeconds ?? 0,
 			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
+			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
 			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
 			customModePrompts: stateValues.customModePrompts ?? {},
 			customSupportPrompts: stateValues.customSupportPrompts ?? {},
@@ -2531,11 +2735,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			browserToolEnabled: stateValues.browserToolEnabled ?? true,
 			telemetrySetting: stateValues.telemetrySetting || "unset",
 			showRooIgnoredFiles: stateValues.showRooIgnoredFiles ?? true,
+			maxReadFileLine: stateValues.maxReadFileLine ?? 500,
 		}
 	}
 
 	async updateTaskHistory(item: HistoryItem): Promise<HistoryItem[]> {
-		const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[] | undefined) || []
+		const history = (this.getGlobalState("taskHistory") as HistoryItem[] | undefined) || []
 		const existingItemIndex = history.findIndex((h) => h.id === item.id)
 
 		if (existingItemIndex !== -1) {
@@ -2543,51 +2748,60 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		} else {
 			history.push(item)
 		}
+
 		await this.updateGlobalState("taskHistory", history)
 		return history
 	}
 
-	// global
+	// ContextProxy
 
-	public async updateGlobalState(key: GlobalStateKey, value: any) {
-		await this.contextProxy.updateGlobalState(key, value)
+	// @deprecated - Use `ContextProxy#setValue` instead.
+	private async updateGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]) {
+		await this.contextProxy.setValue(key, value)
 	}
 
-	public async getGlobalState(key: GlobalStateKey) {
-		return await this.contextProxy.getGlobalState(key)
+	// @deprecated - Use `ContextProxy#getValue` instead.
+	private getGlobalState<K extends keyof GlobalState>(key: K) {
+		return this.contextProxy.getValue(key)
 	}
 
-	// secrets
-
-	public async storeSecret(key: SecretKey, value?: string) {
-		await this.contextProxy.storeSecret(key, value)
+	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		await this.contextProxy.setValue(key, value)
 	}
 
-	private async getSecret(key: SecretKey) {
-		return await this.contextProxy.getSecret(key)
+	public getValue<K extends keyof RooCodeSettings>(key: K) {
+		return this.contextProxy.getValue(key)
 	}
 
-	// global + secret
+	public getValues() {
+		return this.contextProxy.getValues()
+	}
 
-	public async setValues(values: Partial<ConfigurationValues>) {
+	public async setValues(values: RooCodeSettings) {
 		await this.contextProxy.setValues(values)
+	}
+
+	// cwd
+
+	get cwd() {
+		return getWorkspacePath()
 	}
 
 	// dev
 
 	async resetState() {
 		const answer = await vscode.window.showInformationMessage(
-			"Are you sure you want to reset all state and secret storage in the extension? This cannot be undone.",
+			t("common:confirmation.reset_state"),
 			{ modal: true },
-			"Yes",
+			t("common:answers.yes"),
 		)
 
-		if (answer !== "Yes") {
+		if (answer !== t("common:answers.yes")) {
 			return
 		}
 
 		await this.contextProxy.resetAllState()
-		await this.configManager.resetAllConfigs()
+		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
 		await this.postStateToWebview()

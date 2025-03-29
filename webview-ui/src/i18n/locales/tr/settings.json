@@ -3,7 +3,8 @@
 		"save": "Kaydet",
 		"done": "Tamamlandı",
 		"cancel": "İptal",
-		"reset": "Sıfırla"
+		"reset": "Sıfırla",
+		"select": "Seç"
 	},
 	"header": {
 		"title": "Ayarlar",
@@ -24,19 +25,30 @@
 		"checkpoints": "Kontrol Noktaları",
 		"notifications": "Bildirimler",
 		"contextManagement": "Bağlam Yönetimi",
+		"terminal": "Terminal",
 		"advanced": "Gelişmiş",
-		"experimental": "Deneysel Özellikler"
+		"experimental": "Deneysel Özellikler",
+		"language": "Dil",
+		"about": "Roo Code Hakkında"
 	},
 	"autoApprove": {
 		"description": "Roo'nun onay gerektirmeden otomatik olarak işlemler gerçekleştirmesine izin verin. Bu ayarları yalnızca yapay zekaya tamamen güveniyorsanız ve ilgili güvenlik risklerini anlıyorsanız etkinleştirin.",
 		"readOnly": {
 			"label": "Salt okunur işlemleri her zaman onayla",
-			"description": "Etkinleştirildiğinde, Roo otomatik olarak dizin içeriğini görüntüleyecek ve Onayla düğmesine tıklamanıza gerek kalmadan dosyaları okuyacaktır."
+			"description": "Etkinleştirildiğinde, Roo otomatik olarak dizin içeriğini görüntüleyecek ve Onayla düğmesine tıklamanıza gerek kalmadan dosyaları okuyacaktır.",
+			"outsideWorkspace": {
+				"label": "Çalışma alanı dışındaki dosyaları dahil et",
+				"description": "Roo'nun onay gerektirmeden mevcut çalışma alanı dışındaki dosyaları okumasına izin ver."
+			}
 		},
 		"write": {
 			"label": "Yazma işlemlerini her zaman onayla",
 			"description": "Onay gerektirmeden otomatik olarak dosya oluştur ve düzenle",
-			"delayLabel": "Tanılamanın potansiyel sorunları tespit etmesine izin vermek için yazmalardan sonra gecikme"
+			"delayLabel": "Tanılamanın potansiyel sorunları tespit etmesine izin vermek için yazmalardan sonra gecikme",
+			"outsideWorkspace": {
+				"label": "Çalışma alanı dışındaki dosyaları dahil et",
+				"description": "Roo'nun onay gerektirmeden mevcut çalışma alanı dışında dosya oluşturmasına ve düzenlemesine izin ver."
+			}
 		},
 		"browser": {
 			"label": "Tarayıcı eylemlerini her zaman onayla",
@@ -71,9 +83,23 @@
 	},
 	"providers": {
 		"configProfile": "Yapılandırma Profili",
-		"description": "Açıklama",
+		"description": "Sağlayıcılar ve ayarlar arasında hızlıca geçiş yapmak için farklı API yapılandırmalarını kaydedin.",
 		"apiProvider": "API Sağlayıcı",
 		"model": "Model",
+		"nameEmpty": "İsim boş olamaz",
+		"nameExists": "Bu isme sahip bir profil zaten mevcut",
+		"deleteProfile": "Profili sil",
+		"invalidArnFormat": "Geçersiz ARN formatı. Yukarıdaki örnekleri kontrol edin.",
+		"enterNewName": "Yeni ad girin",
+		"addProfile": "Profil ekle",
+		"renameProfile": "Profili yeniden adlandır",
+		"newProfile": "Yeni yapılandırma profili",
+		"enterProfileName": "Profil adını girin",
+		"createProfile": "Profil oluştur",
+		"cannotDeleteOnlyProfile": "Yalnızca tek profili silemezsiniz",
+		"vscodeLmDescription": "VS Code Dil Modeli API'si, diğer VS Code uzantıları tarafından sağlanan modelleri çalıştırmanıza olanak tanır (GitHub Copilot dahil ancak bunlarla sınırlı değildir). Başlamanın en kolay yolu, VS Code Marketplace'ten Copilot ve Copilot Chat uzantılarını yüklemektir.",
+		"awsCustomArnUse": "Kullanmak istediğiniz model için geçerli bir AWS Bedrock ARN'si girin. Format örnekleri:",
+		"awsCustomArnDesc": "ARN içindeki bölgenin yukarıda seçilen AWS Bölgesiyle eşleştiğinden emin olun.",
 		"openRouterApiKey": "OpenRouter API Anahtarı",
 		"getOpenRouterApiKey": "OpenRouter API Anahtarı Al",
 		"apiKeyStorageNotice": "API anahtarları VSCode'un Gizli Depolamasında güvenli bir şekilde saklanır",
@@ -104,6 +130,8 @@
 		"awsSessionToken": "AWS Oturum Belirteci",
 		"awsRegion": "AWS Bölgesi",
 		"awsCrossRegion": "Bölgeler arası çıkarım kullan",
+		"vscodeLmModel": "Dil Modeli",
+		"vscodeLmWarning": "Not: Bu çok deneysel bir entegrasyondur ve sağlayıcı desteği değişebilir. Bir modelin desteklenmediğine dair bir hata alırsanız, bu sağlayıcı tarafındaki bir sorundur.",
 		"googleCloudSetup": {
 			"title": "Google Cloud Vertex AI'yi kullanmak için şunları yapmanız gerekir:",
 			"step1": "1. Google Cloud hesabı oluşturun, Vertex AI API'sini etkinleştirin ve istediğiniz Claude modellerini etkinleştirin.",
@@ -135,6 +163,13 @@
 		"humanRelay": {
 			"description": "API anahtarı gerekmez, ancak kullanıcının bilgileri web sohbet yapay zekasına kopyalayıp yapıştırması gerekir.",
 			"instructions": "Kullanım sırasında bir iletişim kutusu açılacak ve mevcut mesaj otomatik olarak panoya kopyalanacaktır. Bunları web yapay zekalarına (ChatGPT veya Claude gibi) yapıştırmanız, ardından yapay zekanın yanıtını iletişim kutusuna kopyalayıp onay düğmesine tıklamanız gerekir."
+		},
+		"openRouter": {
+			"providerRouting": {
+				"title": "OpenRouter Sağlayıcı Yönlendirmesi",
+				"description": "OpenRouter, modeliniz için mevcut en iyi sağlayıcılara istekleri yönlendirir. Varsayılan olarak, istekler çalışma süresini en üst düzeye çıkarmak için en iyi sağlayıcılar arasında dengelenir. Ancak, bu model için kullanılacak belirli bir sağlayıcı seçebilirsiniz.",
+				"learnMore": "Sağlayıcı yönlendirmesi hakkında daha fazla bilgi edinin"
+			}
 		},
 		"customModel": {
 			"capabilities": "Özel OpenAI uyumlu modelinizin yeteneklerini ve fiyatlandırmasını yapılandırın. Model yeteneklerini belirtirken dikkatli olun, çünkü bunlar Roo Code'un performansını etkileyebilir.",
@@ -218,14 +253,15 @@
 			"label": "Ses efektlerini etkinleştir",
 			"description": "Etkinleştirildiğinde, Roo bildirimler ve olaylar için ses efektleri çalacaktır.",
 			"volumeLabel": "Ses Düzeyi"
+		},
+		"tts": {
+			"label": "Metinden sese özelliğini etkinleştir",
+			"description": "Etkinleştirildiğinde, Roo yanıtlarını metinden sese teknolojisi kullanarak sesli okuyacaktır.",
+			"speedLabel": "Hız"
 		}
 	},
 	"contextManagement": {
 		"description": "Yapay zekanın bağlam penceresine hangi bilgilerin dahil edileceğini kontrol edin, token kullanımını ve yanıt kalitesini etkiler",
-		"terminal": {
-			"label": "Terminal çıktısı sınırı",
-			"description": "Komutları yürütürken terminal çıktısına dahil edilecek maksimum satır sayısı. Aşıldığında, token tasarrufu sağlayarak satırlar ortadan kaldırılacaktır."
-		},
 		"openTabs": {
 			"label": "Açık sekmeler bağlam sınırı",
 			"description": "Bağlama dahil edilecek maksimum VSCode açık sekme sayısı. Daha yüksek değerler daha fazla bağlam sağlar ancak token kullanımını artırır."
@@ -237,6 +273,22 @@
 		"rooignore": {
 			"label": "Listelerde ve aramalarda .rooignore dosyalarını göster",
 			"description": "Etkinleştirildiğinde, .rooignore'daki desenlerle eşleşen dosyalar kilit sembolü ile listelerde gösterilecektir. Devre dışı bırakıldığında, bu dosyalar dosya listelerinden ve aramalardan tamamen gizlenecektir."
+		},
+		"maxReadFile": {
+			"label": "Dosya okuma otomatik kısaltma eşiği",
+			"description": "Model başlangıç/bitiş değerlerini belirtmediğinde Roo bu sayıda satırı okur. Bu sayı dosyanın toplam satır sayısından azsa, Roo kod tanımlamalarının satır numarası dizinini oluşturur. Özel durumlar: -1, Roo'ya tüm dosyayı okumasını (dizinleme olmadan), 0 ise hiç satır okumamasını ve minimum bağlam için yalnızca satır dizinleri sağlamasını belirtir. Düşük değerler başlangıç bağlam kullanımını en aza indirir ve sonraki hassas satır aralığı okumalarına olanak tanır. Açık başlangıç/bitiş istekleri bu ayarla sınırlı değildir.",
+			"lines": "satır",
+			"always_full_read": "Her zaman tüm dosyayı oku"
+		}
+	},
+	"terminal": {
+		"outputLineLimit": {
+			"label": "Terminal çıktısı sınırı",
+			"description": "Komutları yürütürken terminal çıktısına dahil edilecek maksimum satır sayısı. Aşıldığında, token tasarrufu sağlayarak satırlar ortadan kaldırılacaktır."
+		},
+		"shellIntegrationTimeout": {
+			"label": "Terminal kabuk entegrasyonu zaman aşımı",
+			"description": "Komutları yürütmeden önce kabuk entegrasyonunun başlatılması için beklenecek maksimum süre. Kabuk başlatma süresi uzun olan kullanıcılar için, terminalde \"Shell Integration Unavailable\" hatalarını görürseniz bu değerin artırılması gerekebilir."
 		}
 	},
 	"advanced": {
@@ -307,6 +359,8 @@
 		"cacheReadsPrice": "Önbellek okuma fiyatı",
 		"cacheWritesPrice": "Önbellek yazma fiyatı",
 		"enableStreaming": "Akışı etkinleştir",
+		"enableR1Format": "R1 model parametrelerini etkinleştir",
+		"enableR1FormatTips": "QWQ gibi R1 modelleri kullanıldığında etkinleştirilmelidir, 400 hatası alınmaması için",
 		"useAzure": "Azure kullan",
 		"azureApiVersion": "Azure API sürümünü ayarla",
 		"gemini": {
@@ -315,7 +369,11 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Roo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz."
+		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Roo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",
+		"label": "Model",
+		"searchPlaceholder": "Ara",
+		"noMatchFound": "Eşleşme bulunamadı",
+		"useCustomModel": "Özel kullan: {{modelId}}"
 	},
 	"footer": {
 		"feedback": "Herhangi bir sorunuz veya geri bildiriminiz varsa, <githubLink>github.com/RooVetGit/Roo-Code</githubLink> adresinde bir konu açmaktan veya <redditLink>reddit.com/r/RooCode</redditLink> ya da <discordLink>discord.gg/roocode</discordLink>'a katılmaktan çekinmeyin",
@@ -324,9 +382,60 @@
 			"label": "Anonim hata ve kullanım raporlamaya izin ver",
 			"description": "Anonim kullanım verileri ve hata raporları göndererek Roo Code'u geliştirmeye yardımcı olun. Hiçbir kod, istem veya kişisel bilgi asla gönderilmez. Daha fazla ayrıntı için gizlilik politikamıza bakın."
 		},
-		"reset": {
-			"description": "Uzantıdaki tüm global durumu ve gizli depolamayı sıfırlayın.",
-			"button": "Sıfırla"
+		"settings": {
+			"import": "İçe Aktar",
+			"export": "Dışa Aktar",
+			"reset": "Sıfırla"
 		}
+	},
+	"thinkingBudget": {
+		"maxTokens": "Maksimum token",
+		"maxThinkingTokens": "Maksimum düşünme tokeni"
+	},
+	"validation": {
+		"apiKey": "Geçerli bir API anahtarı sağlamalısınız.",
+		"awsRegion": "AWS Bedrock kullanmak için bir bölge seçmelisiniz.",
+		"googleCloud": "Geçerli bir Google Cloud proje kimliği ve bölge sağlamalısınız.",
+		"modelId": "Geçerli bir model kimliği sağlamalısınız.",
+		"modelSelector": "Geçerli bir model seçici sağlamalısınız.",
+		"openAi": "Geçerli bir temel URL, API anahtarı ve model kimliği sağlamalısınız.",
+		"arn": {
+			"invalidFormat": "Geçersiz ARN formatı. Lütfen format gereksinimlerini kontrol edin.",
+			"regionMismatch": "Uyarı: ARN'nizdeki bölge ({{arnRegion}}) seçtiğiniz bölge ({{region}}) ile eşleşmiyor. Bu erişim sorunlarına neden olabilir. Sağlayıcı, ARN'deki bölgeyi kullanacak."
+		},
+		"modelAvailability": "Sağladığınız model kimliği ({{modelId}}) kullanılamıyor. Lütfen başka bir model seçin."
+	},
+	"placeholders": {
+		"apiKey": "API anahtarını girin...",
+		"profileName": "Profil adını girin",
+		"accessKey": "Erişim anahtarını girin...",
+		"secretKey": "Gizli anahtarı girin...",
+		"sessionToken": "Oturum belirtecini girin...",
+		"credentialsJson": "Kimlik bilgileri JSON'ını girin...",
+		"keyFilePath": "Anahtar dosyası yolunu girin...",
+		"projectId": "Proje ID'sini girin...",
+		"customArn": "ARN girin (örn. arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model)",
+		"baseUrl": "Temel URL'yi girin...",
+		"modelId": {
+			"lmStudio": "örn. meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "örn. lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "örn. llama3.1"
+		},
+		"numbers": {
+			"maxTokens": "örn. 4096",
+			"contextWindow": "örn. 128000",
+			"inputPrice": "örn. 0.0001",
+			"outputPrice": "örn. 0.0002",
+			"cacheWritePrice": "örn. 0.00005"
+		}
+	},
+	"defaults": {
+		"ollamaUrl": "Varsayılan: http://localhost:11434",
+		"lmStudioUrl": "Varsayılan: http://localhost:1234",
+		"geminiUrl": "Varsayılan: https://generativelanguage.googleapis.com"
+	},
+	"labels": {
+		"customArn": "Özel ARN",
+		"useCustomArn": "Özel ARN kullan..."
 	}
 }
