@@ -192,6 +192,7 @@ type GlobalSettings = {
 							| "openai-native"
 							| "mistral"
 							| "deepseek"
+							| "ark"
 							| "unbound"
 							| "requesty"
 							| "human-relay"

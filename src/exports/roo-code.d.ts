@@ -65,8 +65,6 @@ type ProviderSettings = {
 	openRouterBaseUrl?: string | undefined
 	openRouterSpecificProvider?: string | undefined
 	openRouterUseMiddleOutTransform?: boolean | undefined
-	arkApiKey?: string | undefined
-	arkBaseUrl?: string | undefined
 	awsAccessKey?: string | undefined
 	awsSecretKey?: string | undefined
 	awsSessionToken?: string | undefined
