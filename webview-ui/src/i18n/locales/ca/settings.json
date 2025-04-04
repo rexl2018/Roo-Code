@@ -83,6 +83,7 @@
 	},
 	"providers": {
 		"configProfile": "Perfil de configuració",
+		"providerDocumentation": "Documentació de {{provider}}",
 		"description": "Deseu diferents configuracions d'API per canviar ràpidament entre proveïdors i configuracions.",
 		"apiProvider": "Proveïdor d'API",
 		"openRouterApiKey": "Clau API d'OpenRouter",
@@ -130,6 +131,9 @@
 		"awsSessionToken": "Token de sessió d'AWS",
 		"awsRegion": "Regió d'AWS",
 		"awsCrossRegion": "Utilitzar inferència entre regions",
+		"enablePromptCaching": "Habilitar emmagatzematge en caché de prompts",
+		"enablePromptCachingTitle": "Habilitar l'emmagatzematge en caché de prompts per millorar el rendiment i reduir els costos per als models compatibles.",
+		"cacheUsageNote": "Nota: Si no veieu l'ús de la caché, proveu de seleccionar un model diferent i després tornar a seleccionar el model desitjat.",
 		"vscodeLmModel": "Model de llenguatge",
 		"vscodeLmWarning": "Nota: Aquesta és una integració molt experimental i el suport del proveïdor variarà. Si rebeu un error sobre un model no compatible, és un problema del proveïdor.",
 		"googleCloudSetup": {
@@ -320,7 +324,7 @@
 	},
 	"experimental": {
 		"warning": "⚠️",
-		"DIFF_STRATEGY": {
+		"DIFF_STRATEGY_UNIFIED": {
 			"name": "Utilitzar estratègia diff unificada experimental",
 			"description": "Activar l'estratègia diff unificada experimental. Aquesta estratègia podria reduir el nombre de reintents causats per errors del model, però pot causar comportaments inesperats o edicions incorrectes. Activeu-la només si enteneu els riscos i esteu disposats a revisar acuradament tots els canvis."
 		},

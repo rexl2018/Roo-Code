@@ -83,6 +83,7 @@
 	},
 	"providers": {
 		"configProfile": "Profil konfiguracji",
+		"providerDocumentation": "Dokumentacja {{provider}}",
 		"description": "Zapisz różne konfiguracje API, aby szybko przełączać się między dostawcami i ustawieniami.",
 		"apiProvider": "Dostawca API",
 		"model": "Model",
@@ -130,6 +131,9 @@
 		"awsSessionToken": "Token sesji AWS",
 		"awsRegion": "Region AWS",
 		"awsCrossRegion": "Użyj wnioskowania międzyregionalnego",
+		"enablePromptCaching": "Włącz buforowanie podpowiedzi",
+		"enablePromptCachingTitle": "Włącz buforowanie podpowiedzi, aby poprawić wydajność i zmniejszyć koszty dla obsługiwanych modeli.",
+		"cacheUsageNote": "Uwaga: Jeśli nie widzisz użycia bufora, spróbuj wybrać inny model, a następnie ponownie wybrać żądany model.",
 		"vscodeLmModel": "Model językowy",
 		"vscodeLmWarning": "Uwaga: To bardzo eksperymentalna integracja, a wsparcie dostawcy może się różnić. Jeśli otrzymasz błąd dotyczący nieobsługiwanego modelu, jest to problem po stronie dostawcy.",
 		"googleCloudSetup": {
@@ -320,7 +324,7 @@
 	},
 	"experimental": {
 		"warning": "⚠️",
-		"DIFF_STRATEGY": {
+		"DIFF_STRATEGY_UNIFIED": {
 			"name": "Użyj eksperymentalnej ujednoliconej strategii diff",
 			"description": "Włącz eksperymentalną ujednoliconą strategię diff. Ta strategia może zmniejszyć liczbę ponownych prób spowodowanych błędami modelu, ale może powodować nieoczekiwane zachowanie lub nieprawidłowe edycje. Włącz tylko jeśli rozumiesz ryzyko i jesteś gotów dokładnie przeglądać wszystkie zmiany."
 		},

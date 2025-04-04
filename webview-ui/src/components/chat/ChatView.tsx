@@ -140,9 +140,13 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						case "followup":
 							setTextAreaDisabled(isPartial)
 							setClineAsk("followup")
-							setEnableButtons(isPartial)
-							// setPrimaryButtonText(undefined)
-							// setSecondaryButtonText(undefined)
+							// setting enable buttons to `false` would trigger a focus grab when
+							// the text area is enabled which is undesirable.
+							// We have no buttons for this tool, so no problem having them "enabled"
+							// to workaround this issue.  See #1358.
+							setEnableButtons(true)
+							setPrimaryButtonText(undefined)
+							setSecondaryButtonText(undefined)
 							break
 						case "tool":
 							if (!isAutoApproved(lastMessage)) {
@@ -1055,8 +1059,15 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					isLast={index === groupedMessages.length - 1}
 					onHeightChange={handleRowHeightChange}
 					isStreaming={isStreaming}
-					onSuggestionClick={(answer: string) => {
-						handleSendMessage(answer, [])
+					onSuggestionClick={(answer: string, event?: React.MouseEvent) => {
+						if (event?.shiftKey) {
+							// Always append to existing text, don't overwrite
+							setInputValue((currentValue) => {
+								return currentValue !== "" ? `${currentValue} \n${answer}` : answer
+							})
+						} else {
+							handleSendMessage(answer, [])
+						}
 					}}
 				/>
 			)
@@ -1339,6 +1350,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				inputValue={inputValue}
 				setInputValue={setInputValue}
 				textAreaDisabled={textAreaDisabled}
+				selectApiConfigDisabled={textAreaDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}
 				selectedImages={selectedImages}
 				setSelectedImages={setSelectedImages}

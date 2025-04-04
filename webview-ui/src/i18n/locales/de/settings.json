@@ -83,6 +83,7 @@
 	},
 	"providers": {
 		"configProfile": "Konfigurationsprofil",
+		"providerDocumentation": "{{provider}}-Dokumentation",
 		"description": "Speichern Sie verschiedene API-Konfigurationen, um schnell zwischen Anbietern und Einstellungen zu wechseln.",
 		"apiProvider": "API-Anbieter",
 		"model": "Modell",
@@ -130,6 +131,9 @@
 		"awsSessionToken": "AWS Sitzungstoken",
 		"awsRegion": "AWS Region",
 		"awsCrossRegion": "Regionsübergreifende Inferenz verwenden",
+		"enablePromptCaching": "Prompt-Caching aktivieren",
+		"enablePromptCachingTitle": "Prompt-Caching aktivieren, um die Leistung zu verbessern und Kosten für unterstützte Modelle zu reduzieren.",
+		"cacheUsageNote": "Hinweis: Wenn Sie keine Cache-Nutzung sehen, versuchen Sie ein anderes Modell auszuwählen und dann Ihr gewünschtes Modell erneut auszuwählen.",
 		"vscodeLmModel": "Sprachmodell",
 		"vscodeLmWarning": "Hinweis: Dies ist eine sehr experimentelle Integration und die Anbieterunterstützung variiert. Wenn Sie einen Fehler über ein nicht unterstütztes Modell erhalten, liegt das Problem auf Anbieterseite.",
 		"googleCloudSetup": {
@@ -320,7 +324,7 @@
 	},
 	"experimental": {
 		"warning": "⚠️",
-		"DIFF_STRATEGY": {
+		"DIFF_STRATEGY_UNIFIED": {
 			"name": "Experimentelle einheitliche Diff-Strategie verwenden",
 			"description": "Aktiviert die experimentelle einheitliche Diff-Strategie. Diese Strategie könnte die Anzahl der durch Modellfehler verursachten Wiederholungen reduzieren, kann aber unerwartetes Verhalten oder falsche Bearbeitungen verursachen. Nur aktivieren, wenn du die Risiken verstehst und bereit bist, alle Änderungen sorgfältig zu überprüfen."
 		},

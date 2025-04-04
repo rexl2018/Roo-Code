@@ -83,6 +83,7 @@
 	},
 	"providers": {
 		"configProfile": "設定プロファイル",
+		"providerDocumentation": "{{provider}}のドキュメント",
 		"description": "異なるAPI設定を保存して、プロバイダーと設定をすばやく切り替えることができます。",
 		"apiProvider": "APIプロバイダー",
 		"model": "モデル",
@@ -130,6 +131,9 @@
 		"awsSessionToken": "AWSセッショントークン",
 		"awsRegion": "AWSリージョン",
 		"awsCrossRegion": "クロスリージョン推論を使用",
+		"enablePromptCaching": "プロンプトキャッシュを有効化",
+		"enablePromptCachingTitle": "サポートされているモデルのパフォーマンスを向上させ、コストを削減するためにプロンプトキャッシュを有効化します。",
+		"cacheUsageNote": "注意：キャッシュの使用が表示されない場合は、別のモデルを選択してから希望のモデルを再度選択してみてください。",
 		"vscodeLmModel": "言語モデル",
 		"vscodeLmWarning": "注意：これは非常に実験的な統合であり、プロバイダーのサポートは異なります。モデルがサポートされていないというエラーが表示された場合、それはプロバイダー側の問題です。",
 		"googleCloudSetup": {
@@ -320,7 +324,7 @@
 	},
 	"experimental": {
 		"warning": "⚠️",
-		"DIFF_STRATEGY": {
+		"DIFF_STRATEGY_UNIFIED": {
 			"name": "実験的な統合diff戦略を使用する",
 			"description": "実験的な統合diff戦略を有効にします。この戦略はモデルエラーによる再試行の回数を減らす可能性がありますが、予期しない動作や不正確な編集を引き起こす可能性があります。リスクを理解し、すべての変更を注意深く確認する準備がある場合にのみ有効にしてください。"
 		},

@@ -12,6 +12,8 @@
 		"export": "导出任务历史",
 		"delete": "删除任务（Shift + 点击跳过确认）"
 	},
+	"unpin": "取消置顶",
+	"pin": "置顶",
 	"tokenProgress": {
 		"availableSpace": "可用空间: {{amount}} tokens",
 		"tokensUsed": "已使用tokens: {{used}} / {{total}}",
@@ -157,7 +159,7 @@
 	"autoApprove": {
 		"title": "自动批准:",
 		"none": "无",
-		"description": "自动批准允许Roo Code无需请求许可即可执行操作。仅为您完全信任的操作启用。",
+		"description": "自动批准允许Roo Code无需请求许可即可执行操作。仅为您完全信任的操作启用。更详细的配置可在<settingsLink>设置</settingsLink>中查看。",
 		"actions": {
 			"readFiles": {
 				"label": "读取文件和目录",
@@ -205,17 +207,14 @@
 		"thinking": "思考中",
 		"seconds": "{{count}}秒"
 	},
+	"followUpSuggest": {
+		"copyToInput": "复制到输入框（或按住Shift点击）"
+	},
 	"announcement": {
-		"title": "🎉 Roo Code 3.10 已发布",
-		"description": "Roo Code 3.10带来强大的生产力提升！",
-		"whatsNew": "新特性",
-		"feature1": "问题的建议回答",
-		"feature2": "改进的大文件处理",
-		"feature3": "重建的@-提及文件查找",
-		"feature4": "",
-		"feature5": "",
-		"hideButton": "隐藏公告",
-		"detailsDiscussLinks": "在<discordLink>Discord</discordLink>和<redditLink>Reddit</redditLink>获取更多详情并参与讨论 🚀"
+		"title": "使用回旋镖任务完成更多工作 🪃",
+		"description": "将工作拆分成子任务，每个子任务在专门的模式中运行，如code、architect、debug或自定义模式。",
+		"learnMore": "了解更多 →",
+		"hideButton": "隐藏公告"
 	},
 	"browser": {
 		"rooWantsToUse": "Roo想使用浏览器:",

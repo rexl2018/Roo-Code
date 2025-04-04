@@ -12,6 +12,8 @@
 		"export": "작업 기록 내보내기",
 		"delete": "작업 삭제 (Shift + 클릭으로 확인 생략)"
 	},
+	"unpin": "고정 해제하기",
+	"pin": "고정하기",
 	"tokenProgress": {
 		"availableSpace": "사용 가능한 공간: {{amount}} 토큰",
 		"tokensUsed": "사용된 토큰: {{used}} / {{total}}",
@@ -157,7 +159,7 @@
 	"autoApprove": {
 		"title": "자동 승인:",
 		"none": "없음",
-		"description": "자동 승인을 사용하면 Roo Code가 권한을 요청하지 않고 작업을 수행할 수 있습니다. 완전히 신뢰할 수 있는 작업에만 활성화하세요.",
+		"description": "자동 승인을 사용하면 Roo Code가 권한을 요청하지 않고 작업을 수행할 수 있습니다. 완전히 신뢰할 수 있는 작업에만 활성화하세요. 더 자세한 구성은 <settingsLink>설정</settingsLink>에서 사용할 수 있습니다.",
 		"actions": {
 			"readFiles": {
 				"label": "파일 및 디렉토리 읽기",
@@ -205,17 +207,14 @@
 		"thinking": "생각 중",
 		"seconds": "{{count}}초"
 	},
+	"followUpSuggest": {
+		"copyToInput": "입력창에 복사 (또는 Shift + 클릭)"
+	},
 	"announcement": {
-		"title": "🎉 Roo Code 3.10 출시",
-		"description": "Roo Code 3.10이 강력한 생산성 향상 기능을 제공합니다!",
-		"whatsNew": "새로운 기능",
-		"feature1": "질문에 대한 제안 응답",
-		"feature2": "대용량 파일 처리 개선",
-		"feature3": "@-언급 파일 검색 기능 재구축",
-		"feature4": "",
-		"feature5": "",
-		"hideButton": "공지 숨기기",
-		"detailsDiscussLinks": "<discordLink>Discord</discordLink>와 <redditLink>Reddit</redditLink>에서 더 자세한 정보를 확인하고 논의하세요 🚀"
+		"title": "부메랑 태스크로 더 많은 작업 수행 🪃",
+		"description": "작업을 하위 태스크로 분할하여 각각 code, architect, debug 또는 사용자 정의 모드와 같은 전문 모드에서 실행하세요.",
+		"learnMore": "더 알아보기 →",
+		"hideButton": "공지 숨기기"
 	},
 	"browser": {
 		"rooWantsToUse": "Roo가 브라우저를 사용하고 싶어합니다:",
