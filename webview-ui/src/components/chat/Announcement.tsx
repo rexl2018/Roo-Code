@@ -62,15 +62,36 @@ const Announcement = ({ version, hideAnnouncement }: AnnouncementProps) => {
 
 			<p style={{ margin: "5px 0px" }}>{t("chat:announcement.description")}</p>
 
-			<h3 style={{ margin: "12px 0 8px" }}>{t("chat:announcement.whatsNew")}</h3>
-			<div style={{ margin: "5px 0px" }}>
-				<ul style={{ margin: "4px 0 6px 20px", padding: 0 }}>
-					{[1, 2, 3, 4, 5].map((num) => {
-						const feature = t(`chat:announcement.feature${num}`)
-						return feature ? <li key={num}>• {feature}</li> : null
-					})}
-				</ul>
-			</div>
+			<h3 style={{ margin: "12px 0 5px", fontSize: "14px" }}>{t("chat:announcement.whatsNew")}</h3>
+			<ul style={{ margin: "5px 0" }}>
+				<li>
+					•{" "}
+					<Trans
+						i18nKey="chat:announcement.feature1"
+						components={{
+							bold: <b />,
+						}}
+					/>
+				</li>
+				<li>
+					•{" "}
+					<Trans
+						i18nKey="chat:announcement.feature2"
+						components={{
+							bold: <b />,
+						}}
+					/>
+				</li>
+				<li>
+					•{" "}
+					<Trans
+						i18nKey="chat:announcement.feature3"
+						components={{
+							bold: <b />,
+						}}
+					/>
+				</li>
+			</ul>
 
 			<p style={{ margin: "10px 0px 0px" }}>
 				<Trans

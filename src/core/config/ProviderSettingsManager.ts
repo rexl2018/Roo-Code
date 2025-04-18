@@ -1,8 +1,9 @@
 import { ExtensionContext } from "vscode"
-import { z } from "zod"
+import { z, ZodError } from "zod"
 
-import { providerSettingsSchema, ApiConfigMeta } from "../../schemas"
-import { Mode } from "../../shared/modes"
+import { providerSettingsSchema, ApiConfigMeta, ProviderSettings } from "../../schemas"
+import { Mode, modes } from "../../shared/modes"
+import { telemetryService } from "../../services/telemetry/TelemetryService"
 
 const providerSettingsWithIdSchema = providerSettingsSchema.extend({ id: z.string().optional() })
 
@@ -12,16 +13,32 @@ export const providerProfilesSchema = z.object({
 	currentApiConfigName: z.string(),
 	apiConfigs: z.record(z.string(), providerSettingsWithIdSchema),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),
+	migrations: z
+		.object({
+			rateLimitSecondsMigrated: z.boolean().optional(),
+			diffSettingsMigrated: z.boolean().optional(),
+		})
+		.optional(),
 })
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
+	private readonly defaultConfigId = this.generateId()
+
+	private readonly defaultModeApiConfigs: Record<string, string> = Object.fromEntries(
+		modes.map((mode) => [mode.slug, this.defaultConfigId]),
+	)
 
 	private readonly defaultProviderProfiles: ProviderProfiles = {
 		currentApiConfigName: "default",
-		apiConfigs: { default: { id: this.generateId() } },
+		apiConfigs: { default: { id: this.defaultConfigId } },
+		modeApiConfigs: this.defaultModeApiConfigs,
+		migrations: {
+			rateLimitSecondsMigrated: true, // Mark as migrated on fresh installs
+			diffSettingsMigrated: true, // Mark as migrated on fresh installs
+		},
 	}
 
 	private readonly context: ExtensionContext
@@ -33,7 +50,7 @@ export class ProviderSettingsManager {
 		this.initialize().catch(console.error)
 	}
 
-	private generateId() {
+	public generateId() {
 		return Math.random().toString(36).substring(2, 15)
 	}
 
@@ -46,7 +63,7 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Initialize config if it doesn't exist.
+	 * Initialize config if it doesn't exist and run migrations.
 	 */
 	public async initialize() {
 		try {
@@ -68,12 +85,93 @@ export class ProviderSettingsManager {
 					}
 				}
 
+				// Ensure migrations field exists
+				if (!providerProfiles.migrations) {
+					providerProfiles.migrations = {
+						rateLimitSecondsMigrated: false,
+						diffSettingsMigrated: false,
+					} // Initialize with default values
+					isDirty = true
+				}
+
+				if (!providerProfiles.migrations.rateLimitSecondsMigrated) {
+					await this.migrateRateLimitSeconds(providerProfiles)
+					providerProfiles.migrations.rateLimitSecondsMigrated = true
+					isDirty = true
+				}
+
+				if (!providerProfiles.migrations.diffSettingsMigrated) {
+					await this.migrateDiffSettings(providerProfiles)
+					providerProfiles.migrations.diffSettingsMigrated = true
+					isDirty = true
+				}
+
 				if (isDirty) {
 					await this.store(providerProfiles)
 				}
 			})
 		} catch (error) {
 			throw new Error(`Failed to initialize config: ${error}`)
+		}
+	}
+
+	private async migrateRateLimitSeconds(providerProfiles: ProviderProfiles) {
+		try {
+			let rateLimitSeconds: number | undefined
+
+			try {
+				rateLimitSeconds = await this.context.globalState.get<number>("rateLimitSeconds")
+			} catch (error) {
+				console.error("[MigrateRateLimitSeconds] Error getting global rate limit:", error)
+			}
+
+			if (rateLimitSeconds === undefined) {
+				// Failed to get the existing value, use the default.
+				rateLimitSeconds = 0
+			}
+
+			for (const [name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				if (apiConfig.rateLimitSeconds === undefined) {
+					apiConfig.rateLimitSeconds = rateLimitSeconds
+				}
+			}
+		} catch (error) {
+			console.error(`[MigrateRateLimitSeconds] Failed to migrate rate limit settings:`, error)
+		}
+	}
+
+	private async migrateDiffSettings(providerProfiles: ProviderProfiles) {
+		try {
+			let diffEnabled: boolean | undefined
+			let fuzzyMatchThreshold: number | undefined
+
+			try {
+				diffEnabled = await this.context.globalState.get<boolean>("diffEnabled")
+				fuzzyMatchThreshold = await this.context.globalState.get<number>("fuzzyMatchThreshold")
+			} catch (error) {
+				console.error("[MigrateDiffSettings] Error getting global diff settings:", error)
+			}
+
+			if (diffEnabled === undefined) {
+				// Failed to get the existing value, use the default.
+				diffEnabled = true
+			}
+
+			if (fuzzyMatchThreshold === undefined) {
+				// Failed to get the existing value, use the default.
+				fuzzyMatchThreshold = 1.0
+			}
+
+			for (const [name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				if (apiConfig.diffEnabled === undefined) {
+					apiConfig.diffEnabled = diffEnabled
+				}
+				if (apiConfig.fuzzyMatchThreshold === undefined) {
+					apiConfig.fuzzyMatchThreshold = fuzzyMatchThreshold
+				}
+			}
+		} catch (error) {
+			console.error(`[MigrateDiffSettings] Failed to migrate diff settings:`, error)
 		}
 	}
 
@@ -264,8 +362,36 @@ export class ProviderSettingsManager {
 	private async load(): Promise<ProviderProfiles> {
 		try {
 			const content = await this.context.secrets.get(this.secretsKey)
-			return content ? providerProfilesSchema.parse(JSON.parse(content)) : this.defaultProviderProfiles
+
+			if (!content) {
+				return this.defaultProviderProfiles
+			}
+
+			const providerProfiles = providerProfilesSchema
+				.extend({
+					apiConfigs: z.record(z.string(), z.any()),
+				})
+				.parse(JSON.parse(content))
+
+			const apiConfigs = Object.entries(providerProfiles.apiConfigs).reduce(
+				(acc, [key, apiConfig]) => {
+					const result = providerSettingsWithIdSchema.safeParse(apiConfig)
+					return result.success ? { ...acc, [key]: result.data } : acc
+				},
+				{} as Record<string, ProviderSettingsWithId>,
+			)
+
+			return {
+				...providerProfiles,
+				apiConfigs: Object.fromEntries(
+					Object.entries(apiConfigs).filter(([_, apiConfig]) => apiConfig !== null),
+				),
+			}
 		} catch (error) {
+			if (error instanceof ZodError) {
+				telemetryService.captureSchemaValidationError({ schemaName: "ProviderProfiles", error })
+			}
+
 			throw new Error(`Failed to read provider profiles from secrets: ${error}`)
 		}
 	}

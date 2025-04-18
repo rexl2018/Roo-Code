@@ -3,7 +3,6 @@
 import * as os from "os"
 import * as path from "path"
 
-import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
 
@@ -15,6 +14,16 @@ import { ApiStreamChunk } from "../../api/transform/stream"
 
 // Mock RooIgnoreController
 jest.mock("../ignore/RooIgnoreController")
+
+// Mock storagePathManager to prevent dynamic import issues
+jest.mock("../../shared/storagePathManager", () => ({
+	getTaskDirectoryPath: jest.fn().mockImplementation((globalStoragePath, taskId) => {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: jest.fn().mockImplementation((globalStoragePath) => {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
+}))
 
 // Mock fileExistsAtPath
 jest.mock("../../utils/fs", () => ({
@@ -304,7 +313,12 @@ describe("Cline", () => {
 
 			expect(cline.diffEnabled).toBe(true)
 			expect(cline.diffStrategy).toBeDefined()
-			expect(getDiffStrategySpy).toHaveBeenCalledWith("claude-3-5-sonnet-20241022", 0.9, false, false)
+
+			expect(getDiffStrategySpy).toHaveBeenCalledWith({
+				model: "claude-3-5-sonnet-20241022",
+				experiments: {},
+				fuzzyMatchThreshold: 0.9,
+			})
 		})
 
 		it("should pass default threshold to diff strategy when not provided", async () => {
@@ -321,7 +335,11 @@ describe("Cline", () => {
 
 			expect(cline.diffEnabled).toBe(true)
 			expect(cline.diffStrategy).toBeDefined()
-			expect(getDiffStrategySpy).toHaveBeenCalledWith("claude-3-5-sonnet-20241022", 1.0, false, false)
+			expect(getDiffStrategySpy).toHaveBeenCalledWith({
+				model: "claude-3-5-sonnet-20241022",
+				experiments: {},
+				fuzzyMatchThreshold: 1.0,
+			})
 		})
 
 		it("should require either task or historyItem", () => {
@@ -932,7 +950,7 @@ describe("Cline", () => {
 						"<task>Text with @/some/path in task tags</task>",
 						expect.any(String),
 						expect.any(Object),
-						expect.any(String),
+						expect.any(Object),
 					)
 
 					// Feedback tag content should be processed
@@ -943,7 +961,7 @@ describe("Cline", () => {
 						"<feedback>Check @/some/path</feedback>",
 						expect.any(String),
 						expect.any(Object),
-						expect.any(String),
+						expect.any(Object),
 					)
 
 					// Regular tool result should not be processed

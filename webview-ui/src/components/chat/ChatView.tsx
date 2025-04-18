@@ -1,6 +1,6 @@
 import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import debounce from "debounce"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { useDeepCompareEffect, useEvent, useMount } from "react-use"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import styled from "styled-components"
@@ -19,6 +19,7 @@ import { getApiMetrics } from "../../../../src/shared/getApiMetrics"
 import { useExtensionState } from "../../context/ExtensionStateContext"
 import { vscode } from "../../utils/vscode"
 import HistoryPreview from "../history/HistoryPreview"
+import RooHero from "../welcome/RooHero"
 import { normalizeApiConfiguration } from "../settings/ApiOptions"
 import Announcement from "./Announcement"
 import BrowserSessionRow from "./BrowserSessionRow"
@@ -32,7 +33,7 @@ import { getAllModes } from "../../../../src/shared/modes"
 import TelemetryBanner from "../common/TelemetryBanner"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import removeMd from "remove-markdown"
-
+import { Trans } from "react-i18next"
 interface ChatViewProps {
 	isHidden: boolean
 	showAnnouncement: boolean
@@ -40,11 +41,18 @@ interface ChatViewProps {
 	showHistoryView: () => void
 }
 
+export interface ChatViewRef {
+	acceptInput: () => void
+}
+
 export const MAX_IMAGES_PER_MESSAGE = 20 // Anthropic limits to 20 images
 
 const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
 
-const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryView }: ChatViewProps) => {
+const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewProps> = (
+	{ isHidden, showAnnouncement, hideAnnouncement, showHistoryView },
+	ref,
+) => {
 	const { t } = useAppTranslation()
 	const modeShortcutText = `${isMac ? "⌘" : "Ctrl"} + . ${t("chat:forNextMode")}`
 	const {
@@ -95,7 +103,6 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false)
 	const [isAtBottom, setIsAtBottom] = useState(false)
 	const lastTtsRef = useRef<string>("")
-
 	const [wasStreaming, setWasStreaming] = useState<boolean>(false)
 	const [showCheckpointWarning, setShowCheckpointWarning] = useState<boolean>(false)
 
@@ -140,9 +147,13 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						case "followup":
 							setTextAreaDisabled(isPartial)
 							setClineAsk("followup")
-							setEnableButtons(isPartial)
-							// setPrimaryButtonText(undefined)
-							// setSecondaryButtonText(undefined)
+							// setting enable buttons to `false` would trigger a focus grab when
+							// the text area is enabled which is undesirable.
+							// We have no buttons for this tool, so no problem having them "enabled"
+							// to workaround this issue.  See #1358.
+							setEnableButtons(true)
+							setPrimaryButtonText(undefined)
+							setSecondaryButtonText(undefined)
 							break
 						case "tool":
 							if (!isAutoApproved(lastMessage)) {
@@ -417,7 +428,6 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			setTextAreaDisabled(true)
 			setClineAsk(undefined)
 			setEnableButtons(false)
-			disableAutoScrollRef.current = false
 		},
 		[clineAsk, startNewTask],
 	)
@@ -464,7 +474,6 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			setTextAreaDisabled(true)
 			setClineAsk(undefined)
 			setEnableButtons(false)
-			disableAutoScrollRef.current = false
 		},
 		[clineAsk, startNewTask, isStreaming],
 	)
@@ -494,6 +503,9 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 							if (!isHidden && !textAreaDisabled && !enableButtons) {
 								textAreaRef.current?.focus()
 							}
+							break
+						case "focusInput":
+							textAreaRef.current?.focus()
 							break
 					}
 					break
@@ -1002,17 +1014,28 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 			<div className="flex items-center p-3 my-3 bg-vscode-inputValidation-warningBackground border border-vscode-inputValidation-warningBorder rounded">
 				<span className="codicon codicon-loading codicon-modifier-spin mr-2" />
 				<span className="text-vscode-foreground">
-					Still initializing checkpoint... If this takes too long, you can{" "}
-					<VSCodeLink
-						href="#"
-						onClick={(e) => {
-							e.preventDefault()
-							window.postMessage({ type: "action", action: "settingsButtonClicked" }, "*")
+					<Trans
+						i18nKey="chat:checkpoint.initializingWarning"
+						components={{
+							settingsLink: (
+								<VSCodeLink
+									href="#"
+									onClick={(e) => {
+										e.preventDefault()
+										window.postMessage(
+											{
+												type: "action",
+												action: "settingsButtonClicked",
+												values: { section: "checkpoints" },
+											},
+											"*",
+										)
+									}}
+									className="inline px-0.5"
+								/>
+							),
 						}}
-						className="inline px-0.5">
-						disable checkpoints in settings
-					</VSCodeLink>{" "}
-					and restart your task.
+					/>
 				</span>
 			</div>
 		),
@@ -1055,8 +1078,15 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					isLast={index === groupedMessages.length - 1}
 					onHeightChange={handleRowHeightChange}
 					isStreaming={isStreaming}
-					onSuggestionClick={(answer: string) => {
-						handleSendMessage(answer, [])
+					onSuggestionClick={(answer: string, event?: React.MouseEvent) => {
+						if (event?.shiftKey) {
+							// Always append to existing text, don't overwrite
+							setInputValue((currentValue) => {
+								return currentValue !== "" ? `${currentValue} \n${answer}` : answer
+							})
+						} else {
+							handleSendMessage(answer, [])
+						}
 					}}
 				/>
 			)
@@ -1139,6 +1169,16 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		}
 	}, [handleKeyDown])
 
+	useImperativeHandle(ref, () => ({
+		acceptInput: () => {
+			if (enableButtons && primaryButtonText) {
+				handlePrimaryButtonClick(inputValue, selectedImages)
+			} else if (!textAreaDisabled && (inputValue.trim() || selectedImages.length > 0)) {
+				handleSendMessage(inputValue, selectedImages)
+			}
+		},
+	}))
+
 	return (
 		<div
 			style={{
@@ -1184,10 +1224,8 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					}}>
 					{telemetrySetting === "unset" && <TelemetryBanner />}
 					{showAnnouncement && <Announcement version={version} hideAnnouncement={hideAnnouncement} />}
-					<div style={{ padding: "0 20px", flexShrink: 0 }}>
-						<h2>{t("chat:greeting")}</h2>
-						<p>{t("chat:aboutMe")}</p>
-					</div>
+
+					<RooHero />
 					{taskHistory.length > 0 && <HistoryPreview showHistoryView={showHistoryView} />}
 				</div>
 			)}
@@ -1339,6 +1377,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				inputValue={inputValue}
 				setInputValue={setInputValue}
 				textAreaDisabled={textAreaDisabled}
+				selectApiConfigDisabled={textAreaDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}
 				selectedImages={selectedImages}
 				setSelectedImages={setSelectedImages}
@@ -1359,6 +1398,8 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		</div>
 	)
 }
+
+const ChatView = forwardRef(ChatViewComponent)
 
 const ScrollToBottomButton = styled.div`
 	background-color: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 55%, transparent);

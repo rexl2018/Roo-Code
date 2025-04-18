@@ -22,15 +22,17 @@ type ProviderSettings = {
 				| "requesty"
 				| "human-relay"
 				| "fake-ai"
+				| "xai"
 		  )
 		| undefined
 	apiModelId?: string | undefined
 	apiKey?: string | undefined
 	anthropicBaseUrl?: string | undefined
+	anthropicUseAuthToken?: boolean | undefined
 	glamaModelId?: string | undefined
 	glamaModelInfo?:
 		| ({
-				maxTokens?: number | undefined
+				maxTokens?: (number | null) | undefined
 				contextWindow: number
 				supportsImages?: boolean | undefined
 				supportsComputerUse?: boolean | undefined
@@ -42,6 +44,9 @@ type ProviderSettings = {
 				description?: string | undefined
 				reasoningEffort?: ("low" | "medium" | "high") | undefined
 				thinking?: boolean | undefined
+				minTokensPerCachePoint?: number | undefined
+				maxCachePoints?: number | undefined
+				cachableFields?: string[] | undefined
 		  } | null)
 		| undefined
 	glamaApiKey?: string | undefined
@@ -49,7 +54,7 @@ type ProviderSettings = {
 	openRouterModelId?: string | undefined
 	openRouterModelInfo?:
 		| ({
-				maxTokens?: number | undefined
+				maxTokens?: (number | null) | undefined
 				contextWindow: number
 				supportsImages?: boolean | undefined
 				supportsComputerUse?: boolean | undefined
@@ -61,6 +66,9 @@ type ProviderSettings = {
 				description?: string | undefined
 				reasoningEffort?: ("low" | "medium" | "high") | undefined
 				thinking?: boolean | undefined
+				minTokensPerCachePoint?: number | undefined
+				maxCachePoints?: number | undefined
+				cachableFields?: string[] | undefined
 		  } | null)
 		| undefined
 	openRouterBaseUrl?: string | undefined
@@ -82,11 +90,13 @@ type ProviderSettings = {
 	vertexRegion?: string | undefined
 	openAiBaseUrl?: string | undefined
 	openAiApiKey?: string | undefined
+	openAiHostHeader?: string | undefined
+	openAiLegacyFormat?: boolean | undefined
 	openAiR1FormatEnabled?: boolean | undefined
 	openAiModelId?: string | undefined
 	openAiCustomModelInfo?:
 		| ({
-				maxTokens?: number | undefined
+				maxTokens?: (number | null) | undefined
 				contextWindow: number
 				supportsImages?: boolean | undefined
 				supportsComputerUse?: boolean | undefined
@@ -98,6 +108,9 @@ type ProviderSettings = {
 				description?: string | undefined
 				reasoningEffort?: ("low" | "medium" | "high") | undefined
 				thinking?: boolean | undefined
+				minTokensPerCachePoint?: number | undefined
+				maxCachePoints?: number | undefined
+				cachableFields?: string[] | undefined
 		  } | null)
 		| undefined
 	openAiUseAzure?: boolean | undefined
@@ -130,7 +143,7 @@ type ProviderSettings = {
 	unboundModelId?: string | undefined
 	unboundModelInfo?:
 		| ({
-				maxTokens?: number | undefined
+				maxTokens?: (number | null) | undefined
 				contextWindow: number
 				supportsImages?: boolean | undefined
 				supportsComputerUse?: boolean | undefined
@@ -142,13 +155,16 @@ type ProviderSettings = {
 				description?: string | undefined
 				reasoningEffort?: ("low" | "medium" | "high") | undefined
 				thinking?: boolean | undefined
+				minTokensPerCachePoint?: number | undefined
+				maxCachePoints?: number | undefined
+				cachableFields?: string[] | undefined
 		  } | null)
 		| undefined
 	requestyApiKey?: string | undefined
 	requestyModelId?: string | undefined
 	requestyModelInfo?:
 		| ({
-				maxTokens?: number | undefined
+				maxTokens?: (number | null) | undefined
 				contextWindow: number
 				supportsImages?: boolean | undefined
 				supportsComputerUse?: boolean | undefined
@@ -160,12 +176,20 @@ type ProviderSettings = {
 				description?: string | undefined
 				reasoningEffort?: ("low" | "medium" | "high") | undefined
 				thinking?: boolean | undefined
+				minTokensPerCachePoint?: number | undefined
+				maxCachePoints?: number | undefined
+				cachableFields?: string[] | undefined
 		  } | null)
 		| undefined
-	modelTemperature?: (number | null) | undefined
+	xaiApiKey?: string | undefined
 	modelMaxTokens?: number | undefined
 	modelMaxThinkingTokens?: number | undefined
 	includeMaxTokens?: boolean | undefined
+	modelTemperature?: (number | null) | undefined
+	reasoningEffort?: ("low" | "medium" | "high") | undefined
+	rateLimitSeconds?: number | undefined
+	diffEnabled?: boolean | undefined
+	fuzzyMatchThreshold?: number | undefined
 	fakeAi?: unknown | undefined
 }
 
@@ -197,6 +221,7 @@ type GlobalSettings = {
 							| "requesty"
 							| "human-relay"
 							| "fake-ai"
+							| "xai"
 					  )
 					| undefined
 		  }[]
@@ -220,6 +245,7 @@ type GlobalSettings = {
 				cacheReads?: number | undefined
 				totalCost: number
 				size?: number | undefined
+				workspace?: string | undefined
 		  }[]
 		| undefined
 	autoApprovalEnabled?: boolean | undefined
@@ -243,7 +269,6 @@ type GlobalSettings = {
 	remoteBrowserHost?: string | undefined
 	cachedChromeHostUrl?: string | undefined
 	enableCheckpoints?: boolean | undefined
-	checkpointStorage?: ("task" | "workspace") | undefined
 	ttsEnabled?: boolean | undefined
 	ttsSpeed?: number | undefined
 	soundEnabled?: boolean | undefined
@@ -254,16 +279,20 @@ type GlobalSettings = {
 	maxReadFileLine?: number | undefined
 	terminalOutputLineLimit?: number | undefined
 	terminalShellIntegrationTimeout?: number | undefined
+	terminalCommandDelay?: number | undefined
+	terminalPowershellCounter?: boolean | undefined
+	terminalZshClearEolMark?: boolean | undefined
+	terminalZshOhMy?: boolean | undefined
+	terminalZshP10k?: boolean | undefined
+	terminalZdotdir?: boolean | undefined
 	rateLimitSeconds?: number | undefined
 	diffEnabled?: boolean | undefined
 	fuzzyMatchThreshold?: number | undefined
 	experiments?:
 		| {
-				experimentalDiffStrategy: boolean
 				search_and_replace: boolean
 				insert_content: boolean
 				powerSteering: boolean
-				multi_search_and_replace: boolean
 		  }
 		| undefined
 	language?:
@@ -376,8 +405,10 @@ type ClineMessage = {
 				| "mcp_server_response"
 				| "new_task_started"
 				| "new_task"
+				| "subtask_result"
 				| "checkpoint_saved"
 				| "rooignore_error"
+				| "diff_error"
 		  )
 		| undefined
 	text?: string | undefined
@@ -410,3 +441,116 @@ type TokenUsage = {
 }
 
 export type { TokenUsage }
+
+type RooCodeEvents = {
+	message: [
+		{
+			taskId: string
+			action: "created" | "updated"
+			message: {
+				ts: number
+				type: "ask" | "say"
+				ask?:
+					| (
+							| "followup"
+							| "command"
+							| "command_output"
+							| "completion_result"
+							| "tool"
+							| "api_req_failed"
+							| "resume_task"
+							| "resume_completed_task"
+							| "mistake_limit_reached"
+							| "browser_action_launch"
+							| "use_mcp_server"
+							| "finishTask"
+					  )
+					| undefined
+				say?:
+					| (
+							| "task"
+							| "error"
+							| "api_req_started"
+							| "api_req_finished"
+							| "api_req_retried"
+							| "api_req_retry_delayed"
+							| "api_req_deleted"
+							| "text"
+							| "reasoning"
+							| "completion_result"
+							| "user_feedback"
+							| "user_feedback_diff"
+							| "command_output"
+							| "tool"
+							| "shell_integration_warning"
+							| "browser_action"
+							| "browser_action_result"
+							| "command"
+							| "mcp_server_request_started"
+							| "mcp_server_response"
+							| "new_task_started"
+							| "new_task"
+							| "subtask_result"
+							| "checkpoint_saved"
+							| "rooignore_error"
+							| "diff_error"
+					  )
+					| undefined
+				text?: string | undefined
+				images?: string[] | undefined
+				partial?: boolean | undefined
+				reasoning?: string | undefined
+				conversationHistoryIndex?: number | undefined
+				checkpoint?:
+					| {
+							[x: string]: unknown
+					  }
+					| undefined
+				progressStatus?:
+					| {
+							icon?: string | undefined
+							text?: string | undefined
+					  }
+					| undefined
+			}
+		},
+	]
+	taskCreated: [string]
+	taskStarted: [string]
+	taskModeSwitched: [string, string]
+	taskPaused: [string]
+	taskUnpaused: [string]
+	taskAskResponded: [string]
+	taskAborted: [string]
+	taskSpawned: [string, string]
+	taskCompleted: [
+		string,
+		{
+			totalTokensIn: number
+			totalTokensOut: number
+			totalCacheWrites?: number | undefined
+			totalCacheReads?: number | undefined
+			totalCost: number
+			contextTokens: number
+		},
+		{
+			[x: string]: {
+				attempts: number
+				failures: number
+			}
+		},
+	]
+	taskTokenUsageUpdated: [
+		string,
+		{
+			totalTokensIn: number
+			totalTokensOut: number
+			totalCacheWrites?: number | undefined
+			totalCacheReads?: number | undefined
+			totalCost: number
+			contextTokens: number
+		},
+	]
+}
+
+export type { RooCodeEvents }
