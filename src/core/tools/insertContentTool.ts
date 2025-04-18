@@ -1,14 +1,15 @@
+import delay from "delay"
+import fs from "fs/promises"
+
 import { getReadablePath } from "../../utils/path"
 import { Cline } from "../Cline"
-import { ToolUse } from "../assistant-message"
-import { AskApproval, HandleError, PushToolResult, RemoveClosingTag } from "./types"
+import { ToolUse, AskApproval, HandleError, PushToolResult, RemoveClosingTag } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { ClineSayTool } from "../../shared/ExtensionMessage"
 import path from "path"
+import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { insertGroups } from "../diff/insert-groups"
-import delay from "delay"
-import fs from "fs/promises"
 
 export async function insertContentTool(
 	cline: Cline,
@@ -36,12 +37,14 @@ export async function insertContentTool(
 		// Validate required parameters
 		if (!relPath) {
 			cline.consecutiveMistakeCount++
+			cline.recordToolUsage({ toolName: "insert_content", success: false })
 			pushToolResult(await cline.sayAndCreateMissingParamError("insert_content", "path"))
 			return
 		}
 
 		if (!operations) {
 			cline.consecutiveMistakeCount++
+			cline.recordToolUsage({ toolName: "insert_content", success: false })
 			pushToolResult(await cline.sayAndCreateMissingParamError("insert_content", "operations"))
 			return
 		}
@@ -51,6 +54,7 @@ export async function insertContentTool(
 
 		if (!fileExists) {
 			cline.consecutiveMistakeCount++
+			cline.recordToolUsage({ toolName: "insert_content", success: false })
 			const formattedError = `File does not exist at path: ${absolutePath}\n\n<error_details>\nThe specified file could not be found. Please verify the file path and try again.\n</error_details>`
 			await cline.say("error", formattedError)
 			pushToolResult(formattedError)
@@ -69,6 +73,7 @@ export async function insertContentTool(
 			}
 		} catch (error) {
 			cline.consecutiveMistakeCount++
+			cline.recordToolUsage({ toolName: "insert_content", success: false })
 			await cline.say("error", `Failed to parse operations JSON: ${error.message}`)
 			pushToolResult(formatResponse.toolError("Invalid operations JSON format"))
 			return
@@ -111,10 +116,7 @@ export async function insertContentTool(
 
 		await cline.diffViewProvider.update(updatedContent, true)
 
-		const completeMessage = JSON.stringify({
-			...sharedMessageProps,
-			diff,
-		} satisfies ClineSayTool)
+		const completeMessage = JSON.stringify({ ...sharedMessageProps, diff } satisfies ClineSayTool)
 
 		const didApprove = await cline
 			.ask("tool", completeMessage, false)
@@ -127,6 +129,12 @@ export async function insertContentTool(
 		}
 
 		const { newProblemsMessage, userEdits, finalContent } = await cline.diffViewProvider.saveChanges()
+
+		// Track file edit operation
+		if (relPath) {
+			await cline.getFileContextTracker().trackFileContext(relPath, "roo_edited" as RecordSource)
+		}
+
 		cline.didEditFile = true
 
 		if (!userEdits) {
@@ -143,6 +151,7 @@ export async function insertContentTool(
 
 		console.debug("[DEBUG] User made edits, sending feedback diff:", userFeedbackDiff)
 		await cline.say("user_feedback_diff", userFeedbackDiff)
+
 		pushToolResult(
 			`The user made the following updates to your content:\n\n${userEdits}\n\n` +
 				`The updated content, which includes both your original modifications and the user's edits, has been successfully saved to ${relPath.toPosix()}. Here is the full, updated content of the file:\n\n` +
@@ -153,6 +162,8 @@ export async function insertContentTool(
 				`3. If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.` +
 				`${newProblemsMessage}`,
 		)
+
+		cline.recordToolUsage({ toolName: "insert_content" })
 		await cline.diffViewProvider.reset()
 	} catch (error) {
 		handleError("insert content", error)

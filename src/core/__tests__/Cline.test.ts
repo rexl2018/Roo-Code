@@ -3,7 +3,6 @@
 import * as os from "os"
 import * as path from "path"
 
-import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
 
@@ -15,6 +14,16 @@ import { ApiStreamChunk } from "../../api/transform/stream"
 
 // Mock RooIgnoreController
 jest.mock("../ignore/RooIgnoreController")
+
+// Mock storagePathManager to prevent dynamic import issues
+jest.mock("../../shared/storagePathManager", () => ({
+	getTaskDirectoryPath: jest.fn().mockImplementation((globalStoragePath, taskId) => {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: jest.fn().mockImplementation((globalStoragePath) => {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
+}))
 
 // Mock fileExistsAtPath
 jest.mock("../../utils/fs", () => ({
@@ -941,6 +950,7 @@ describe("Cline", () => {
 						"<task>Text with @/some/path in task tags</task>",
 						expect.any(String),
 						expect.any(Object),
+						expect.any(Object),
 					)
 
 					// Feedback tag content should be processed
@@ -950,6 +960,7 @@ describe("Cline", () => {
 					expect(mockParseMentions).toHaveBeenCalledWith(
 						"<feedback>Check @/some/path</feedback>",
 						expect.any(String),
+						expect.any(Object),
 						expect.any(Object),
 					)
 

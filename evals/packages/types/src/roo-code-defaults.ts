@@ -2,20 +2,24 @@ import { RooCodeSettings } from "./roo-code.js"
 
 export const rooCodeDefaults: RooCodeSettings = {
 	apiProvider: "openrouter",
-	openRouterModelId: "google/gemini-2.0-flash-001", // "anthropic/claude-3.7-sonnet",
+	openRouterUseMiddleOutTransform: false,
+
+	// modelTemperature: null,
+	// reasoningEffort: "high",
+	rateLimitSeconds: 0,
 
 	pinnedApiConfigs: {},
-	lastShownAnnouncementId: "mar-20-2025-3-10",
+	lastShownAnnouncementId: "apr-16-2025-3-12",
 
 	autoApprovalEnabled: true,
 	alwaysAllowReadOnly: true,
 	alwaysAllowReadOnlyOutsideWorkspace: false,
 	alwaysAllowWrite: true,
 	alwaysAllowWriteOutsideWorkspace: false,
-	writeDelayMs: 200,
+	writeDelayMs: 1000,
 	alwaysAllowBrowser: true,
 	alwaysApproveResubmit: true,
-	requestDelaySeconds: 5,
+	requestDelaySeconds: 10,
 	alwaysAllowMcp: true,
 	alwaysAllowModeSwitch: true,
 	alwaysAllowSubtasks: true,
@@ -24,8 +28,8 @@ export const rooCodeDefaults: RooCodeSettings = {
 
 	browserToolEnabled: false,
 	browserViewportSize: "900x600",
-	screenshotQuality: 38,
-	remoteBrowserEnabled: true,
+	screenshotQuality: 75,
+	remoteBrowserEnabled: false,
 
 	enableCheckpoints: false,
 	checkpointStorage: "task",
@@ -41,16 +45,21 @@ export const rooCodeDefaults: RooCodeSettings = {
 	maxReadFileLine: 500,
 
 	terminalOutputLineLimit: 500,
-	terminalShellIntegrationTimeout: 15000,
+	terminalShellIntegrationTimeout: 30000,
+	terminalCommandDelay: 0,
+	terminalPowershellCounter: false,
+	terminalZshClearEolMark: true,
+	terminalZshOhMy: true,
+	terminalZshP10k: false,
+	terminalZdotdir: true,
 
-	rateLimitSeconds: 0,
 	diffEnabled: true,
 	fuzzyMatchThreshold: 1.0,
 	experiments: {
-		multi_search_and_replace: false,
-		search_and_replace: true,
+		search_and_replace: false,
 		insert_content: false,
 		powerSteering: false,
+		append_to_file: false,
 	},
 
 	language: "en",

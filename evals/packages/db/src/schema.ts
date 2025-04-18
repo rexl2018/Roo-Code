@@ -2,7 +2,7 @@ import { sqliteTable, text, real, integer, blob, uniqueIndex } from "drizzle-orm
 import { relations } from "drizzle-orm"
 import { createInsertSchema } from "drizzle-zod"
 
-import { GlobalSettings, exerciseLanguages, globalSettingsSchema } from "@evals/types"
+import { RooCodeSettings, ToolUsage, exerciseLanguages, rooCodeSettingsSchema, toolUsageSchema } from "@evals/types"
 
 /**
  * runs
@@ -13,9 +13,10 @@ export const runs = sqliteTable("runs", {
 	taskMetricsId: integer({ mode: "number" }).references(() => taskMetrics.id),
 	model: text().notNull(),
 	description: text(),
-	settings: blob({ mode: "json" }).$type<GlobalSettings>(),
+	settings: blob({ mode: "json" }).$type<RooCodeSettings>(),
 	pid: integer({ mode: "number" }),
 	socketPath: text().notNull(),
+	concurrency: integer({ mode: "number" }).default(2).notNull(),
 	passed: integer({ mode: "number" }).default(0).notNull(),
 	failed: integer({ mode: "number" }).default(0).notNull(),
 	createdAt: integer({ mode: "timestamp" }).notNull(),
@@ -28,7 +29,7 @@ export const runsRelations = relations(runs, ({ one }) => ({
 export type Run = typeof runs.$inferSelect
 
 export const insertRunSchema = createInsertSchema(runs).omit({ id: true, createdAt: true }).extend({
-	settings: globalSettingsSchema.optional(),
+	settings: rooCodeSettingsSchema.optional(),
 })
 
 export type InsertRun = Omit<typeof runs.$inferInsert, "id" | "createdAt">
@@ -83,12 +84,15 @@ export const taskMetrics = sqliteTable("taskMetrics", {
 	cacheReads: integer({ mode: "number" }).notNull(),
 	cost: real().notNull(),
 	duration: integer({ mode: "number" }).notNull(),
+	toolUsage: text({ mode: "json" }).$type<ToolUsage>(),
 	createdAt: integer({ mode: "timestamp" }).notNull(),
 })
 
 export type TaskMetrics = typeof taskMetrics.$inferSelect
 
-export const insertTaskMetricsSchema = createInsertSchema(taskMetrics).omit({ id: true, createdAt: true })
+export const insertTaskMetricsSchema = createInsertSchema(taskMetrics)
+	.omit({ id: true, createdAt: true })
+	.extend({ toolUsage: toolUsageSchema.optional() })
 
 export type InsertTaskMetrics = Omit<typeof taskMetrics.$inferInsert, "id" | "createdAt">
 
